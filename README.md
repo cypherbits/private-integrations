@@ -3,12 +3,13 @@
 A small Home Assistant custom integration that installs and updates other custom
 integrations from **private GitHub repositories**.
 
-It is conceptually similar to [HACS](https://hacs.xyz) and to the
+It does the job of the
 [Marketplace](https://www.home-assistant.io/integrations/marketplace) that Home
-Assistant ships since 2026.11, but stripped to a single job: pull a custom
-integration out of a GitHub repo you own — public or private — and write it into
-your `custom_components/` folder. There is no central catalog; you add repos by
-their `owner/repo` name.
+Assistant ships since 2026.11, but for repositories the Marketplace cannot
+reach: pull a custom integration out of a GitHub repo you own — public or
+private — and write it into your `custom_components/` folder. There is no
+central catalog; you add repos by their `owner/repo` name. HACS, which the
+Marketplace replaced in 2026.11, played a similar role on older releases.
 
 Useful when you maintain integrations that you do not want to publish (work
 projects, personal experiments, betas, internal tools) but still want to deploy
@@ -22,39 +23,43 @@ for access to private ones.
 - Authenticated GitHub access via a Personal Access Token, so private repos work.
 - Track a repo by **latest release**, a specific **tag**, a **branch** (e.g.
   `main`), or a pinned **commit SHA**.
-- **No background polling** — Private Integrations never reaches out to GitHub on its
-  own. Updates happen when you click **Install / update**, on your schedule.
-  Designed for repos you control yourself, where you already know when there's
-  something new to pull.
+- **No background polling** — unlike the Marketplace, Private Integrations never
+  reaches out to GitHub on its own. Updates happen when you click **Install /
+  update**, on your schedule. Designed for repos you control yourself, where you
+  already know when there's something new to pull.
 - Path-traversal-safe tarball extraction.
 
-Themes, frontend cards, AppDaemon apps, and other HACS categories are out of
-scope. This is integrations only.
+Themes, dashboards, templates, apps, and the other Marketplace categories are
+out of scope. This is integrations only.
 
 ## Requirements
 
 - Home Assistant **2024.11** or newer. Tested against 2024.11 (the minimum),
-  2026.10 and 2026.11: the suite runs on the first two and on the version the
-  test harness pins, and a real Home Assistant is booted for the newest release.
-  Home Assistant 2026.x runs on Python 3.14, and so does this integration.
+  2026.10 and 2026.11.1: the suite runs on the first two and on the version the
+  test harness pins, and a real Home Assistant 2026.11.1 is booted for the
+  newest release. Home Assistant 2026.x runs on Python 3.14, and so does this
+  integration.
 - A GitHub Personal Access Token with read access to the repositories you want
   to install.
 
 ## Installation
 
-### Recommended: the built-in Marketplace (Home Assistant 2026.11+)
+### Marketplace (Home Assistant 2026.11+)
 
-Home Assistant ships a **Marketplace** integration that installs integrations
-from GitHub, including repositories that are not in its catalog: **Settings →
-Devices & services → Add integration → Marketplace**, then *Add repository* with
-the URL. It updates what it installed and shows update entities.
+The Marketplace can install this integration itself when its repository is
+**public** (the Marketplace does not accept private repositories):
 
-Use it for everything public. Use this integration for the repositories it
-cannot reach: the Marketplace documents that a custom repository must be a
-**public** repository, and that its GitHub connection does not request access to
-private repositories.
+1. Make sure the repository is public.
+2. In Home Assistant, open **Settings → Marketplace → Add from link**.
+3. Enter `https://github.com/cypherbits/private-integrations`.
+4. Select the repository, click **Install**, then restart Home Assistant.
 
-### HACS
+If this repository is private, use the manual method below.
+
+### HACS (Home Assistant 2026.10 and older)
+
+HACS was replaced by the Marketplace in 2026.11, so this only applies to older
+releases:
 
 1. In Home Assistant, open **HACS → Integrations → ⋮ → Custom repositories**.
 2. Add `https://github.com/cypherbits/private-integrations` as an **Integration**
@@ -62,11 +67,41 @@ private repositories.
 3. Click **Install** on the new "Private Integrations" entry, then **restart Home
    Assistant**.
 
+When Home Assistant upgrades to 2026.11 it removes HACS. Files that HACS
+installed, including this integration, stay in place; update them manually or
+reinstall from the Marketplace if the repository is public.
+
 ### Manual
 
-If you don't have HACS or the Marketplace, copy
+This works whether the repository is public or private, and it is the only
+option when it is private. Copy
 `custom_components/private_integrations/` into your Home Assistant
 `config/custom_components/` directory and restart.
+
+## Using it alongside the Marketplace
+
+Home Assistant 2026.11 ships the official **Marketplace**, and both tools write
+to `custom_components/`, so keep their responsibilities separate:
+
+- **Marketplace**: public repositories, catalog content, dashboards, themes and
+  templates. It checks for updates in the background and creates update entities
+  and repairs.
+- **Private Integrations**: private repositories, and public ones you prefer to
+  pull on demand. The Marketplace cannot add a private repository: custom
+  repositories must be public, and its GitHub connection does not request access
+  to private repositories.
+- **Do not track the same integration in both.** Private Integrations refuses to
+  overwrite a folder it did not install, including one installed by the
+  Marketplace, but the Marketplace does not know about Private Integrations'
+  bookkeeping and may replace those files if you install the same repository
+  there.
+- Private Integrations refuses to install over the `hacs`, `homeassistant`,
+  `marketplace` and `private_integrations` folders.
+
+If you are coming from HACS: Home Assistant removes HACS when it upgrades to
+2026.11 and the Marketplace takes over its public content. Private repositories
+that HACS used to update with a token are not readable by the Marketplace; add
+them here instead.
 
 ## First-time setup
 
@@ -97,7 +132,8 @@ If you don't have HACS or the Marketplace, copy
    register the repo and copy its `custom_components/<name>/` folder into
    place.
 6. **Restart Home Assistant** to load the new integration. HA does not
-   hot-reload custom integration code — this constraint applies to HACS too.
+   hot-reload custom integration code — this constraint applies to the
+   Marketplace too.
 
 If the install fails, the repository stays tracked and the dialog says why: the
 add itself succeeded, and what usually goes wrong — the wrong folder name, a
@@ -126,14 +162,14 @@ lets you pick a tracked repo and:
   keep the integration running while you move it to another tool.
 
 Installs never overwrite a `custom_components/<name>/` folder that Private
-Integrations did not create: integrations installed by HACS, Home Assistant
-itself or by hand are protected, as are the `hacs`, `homeassistant` and
-`private_integrations` folders. A folder is tied to the repository that
-installed it (a marker inside the folder records which one), and two tracked
-repositories cannot share the same one. The single exception is a folder whose
-owner is no longer tracked -- after removing a repository with **Delete
-installed files** unchecked -- which a new repository can take over instead of
-leaving it unusable.
+Integrations did not create: integrations installed by the Marketplace, HACS,
+Home Assistant itself or by hand are protected, as are the `hacs`,
+`homeassistant`, `marketplace` and `private_integrations` folders. A folder is
+tied to the repository that installed it (a marker inside the folder records
+which one), and two tracked repositories cannot share the same one. The single
+exception is a folder whose owner is no longer tracked -- after removing a
+repository with **Delete installed files** unchecked -- which a new repository
+can take over instead of leaving it unusable.
 
 There is no background polling. Private Integrations only contacts GitHub when you
 explicitly add, install, or update a repo.
@@ -168,8 +204,8 @@ Options on those services:
 ## Repository layout requirements
 
 The repo must contain a `custom_components/<integration_name>/` directory at
-its root, the same convention HACS uses. Private Integrations extracts only that
-folder, ignoring everything else in the repo.
+its root, the same convention the Marketplace uses. Private Integrations
+extracts only that folder, ignoring everything else in the repo.
 
 If a repo contains more than one integration, set `integration_name` when
 calling `add_repository` to pick which one to install.
@@ -179,24 +215,38 @@ and its `domain` must match the folder name — Home Assistant cannot load an
 integration otherwise, so the install is rejected instead of writing files
 that would never work.
 
-## Why not just use HACS?
+## Why not just use the Marketplace?
 
-HACS is great. Use it if your integrations are public or you are happy
-configuring HACS's "custom repositories" feature — that flow does support
-private repos with a token. Private Integrations exists because:
+The Marketplace is the right default for public content. Private Integrations
+exists because:
 
-- I wanted a tool that is private-first instead of private-as-a-side-feature.
-- I wanted no UI dependency on the HACS panel, just plain HA services.
-- It is small enough to read end-to-end (~2,200 lines, docstrings included)
-  and audit before running.
+- The Marketplace only installs public repositories, and its GitHub connection
+  does not request access to private ones.
+- It polls in the background and creates update entities; this tool only
+  contacts GitHub when you ask it to.
+- It is private-first, with plain Home Assistant services and no separate UI
+  panel.
+- It is small enough to read end-to-end (~2,200 lines, docstrings included) and
+  audit before running.
+- Private Integrations also works on Home Assistant 2024.11 through 2026.10,
+  before the Marketplace existed. HACS covered part of that range and was
+  replaced by the Marketplace in 2026.11.
 
 ## Development
 
 ```bash
-pip install -r requirements_test.txt
+# Pick one stack, in a fresh virtual environment:
+pip install -r requirements_test.txt      # Home Assistant 2026.10
+pip install -r requirements_test_min.txt  # Home Assistant 2024.11
+
 pytest -q
 ruff check .
 ```
+
+Both files are test-only: the integration has no runtime requirements, so Home
+Assistant never installs them. `requirements_test.txt` pins the recent Home
+Assistant stack used day to day; `requirements_test_min.txt` pins the oldest
+release this integration claims to support.
 
 `pytest` runs coverage and fails below 95 %, so a change that stops exercising a
 branch breaks the build. The suite covers tarball extraction (including path
@@ -221,7 +271,3 @@ unload. Run it locally against any version with:
 pip install homeassistant          # whatever version you want to check
 python scripts/smoke_test.py
 ```
-
-## License
-
-MIT — see [LICENSE](LICENSE).

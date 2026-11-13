@@ -1,10 +1,16 @@
 """Consistency checks between the code, the strings and the service docs."""
 import json
+import re
 from pathlib import Path
 
 from custom_components.private_integrations import const
 
 COMPONENT_DIR = Path(const.__file__).parent
+REPO_ROOT = COMPONENT_DIR.parent.parent
+MANIFEST = json.loads((COMPONENT_DIR / "manifest.json").read_text(encoding="utf-8"))
+REPOSITORY_MANIFEST = json.loads(
+    (REPO_ROOT / "hacs.json").read_text(encoding="utf-8")
+)
 STRINGS = json.loads((COMPONENT_DIR / "strings.json").read_text(encoding="utf-8"))
 EN_TRANSLATIONS = json.loads(
     (COMPONENT_DIR / "translations" / "en.json").read_text(encoding="utf-8")
@@ -35,6 +41,15 @@ def test_spanish_translation_is_complete():
     """Every key in the source strings exists in ``es.json`` too."""
     assert _key_tree(ES_TRANSLATIONS) == _key_tree(STRINGS)
     assert "" not in _leaf_values(ES_TRANSLATIONS)
+
+
+def test_the_marketplace_can_read_the_repository():
+    """The Marketplace reads ``hacs.json`` and installs into the domain folder."""
+    assert REPOSITORY_MANIFEST["name"] == MANIFEST["name"]
+    assert REPOSITORY_MANIFEST["content_in_root"] is False
+    assert re.fullmatch(r"\d+\.\d+\.\d+", REPOSITORY_MANIFEST["homeassistant"])
+    assert MANIFEST["domain"] == COMPONENT_DIR.name
+    assert MANIFEST["version"]
 
 
 def test_every_selector_option_is_translated():

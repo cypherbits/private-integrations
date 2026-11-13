@@ -35,7 +35,9 @@ EXTRACT_CHUNK_SIZE = 64 * 1024
 BACKUP_SUFFIX = ".private_integrations-backup"
 
 #: Integrations this tool must never overwrite or delete.
-PROTECTED_INTEGRATIONS = frozenset({"hacs", "homeassistant", "private_integrations"})
+PROTECTED_INTEGRATIONS = frozenset(
+    {"hacs", "homeassistant", "marketplace", "private_integrations"}
+)
 
 # Home Assistant imports custom_components/<domain> as a Python module and
 # uses the folder name as the integration domain, which is lowercase

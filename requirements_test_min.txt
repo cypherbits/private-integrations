@@ -1,6 +1,7 @@
 # Test stack for the oldest Home Assistant version this integration claims to
 # support (hacs.json "homeassistant"). It is deliberately separate from
 # requirements_test.txt: that one tracks a recent release.
+# pytest-homeassistant-custom-component 0.13.183 pins Home Assistant 2024.11.2.
 pytest==8.3.3
 pytest-cov==5.0.0
 pytest-homeassistant-custom-component==0.13.183
