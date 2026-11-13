@@ -1,0 +1,205 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Private Integrations",
+        "description": "Paste a GitHub Personal Access Token. Two ways to create one:\n\n- **[Classic PAT (pre-filled with 'repo' scope)]({classic_url})** — works for any private repo your account can access.\n- **[Fine-grained PAT]({fine_url})** — more secure: scope it to only the specific repos you want to install, with **Repository permissions → Contents: Read-only**.\n\nThe token is stored in the config entry, which Home Assistant keeps in `.storage/core.config_entries` as plain JSON: it is redacted from the API but not encrypted, so treat your backups as secrets.",
+        "data": {
+          "github_token": "GitHub token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Private Integrations",
+        "description": "The current GitHub token is no longer valid. Paste a new one. You can [create a classic PAT]({classic_url}) or a [fine-grained PAT]({fine_url}).",
+        "data": {
+          "github_token": "GitHub token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "GitHub rejected the token.",
+      "cannot_connect": "Could not reach GitHub."
+    },
+    "abort": {
+      "already_configured": "Private Integrations is already configured.",
+      "reauth_successful": "Token updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Private Integrations",
+        "description": "What would you like to do?",
+        "menu_options": {
+          "add_repository": "Add a private repository",
+          "manage_repository": "Manage / install / update a tracked repository",
+          "update_token": "Update the GitHub token"
+        }
+      },
+      "add_repository": {
+        "title": "Add a private repository",
+        "description": "Paste the GitHub repository URL or 'owner/repo', then choose how to track it.\n\n_After a successful install you will need to restart Home Assistant for the new integration to load. A persistent notification will remind you._",
+        "data": {
+          "full_name": "Repository (URL or owner/repo)",
+          "ref_type": "Track by",
+          "ref": "Tag / branch / commit (leave blank for the default branch)",
+          "integration_name": "Integration folder name (only if the repo has multiple)",
+          "install_now": "Install immediately after adding"
+        }
+      },
+      "manage_repository": {
+        "title": "Pick a tracked repository",
+        "description": "Choose which repository to act on.",
+        "data": {
+          "full_name": "Repository"
+        }
+      },
+      "repository_action": {
+        "title": "{repo}",
+        "description": "Pick an action. **Install / update** writes to `custom_components/` and requires a Home Assistant restart to take effect.\n\n{notice}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "installed_confirmation": {
+        "title": "Installed",
+        "description": "**{repo}** is installed as `custom_components/{integration}/` (version: `{version}`).\n\n## Restart required\n\nHome Assistant must be **restarted** for the new integration to load. The files are on disk but not yet active.\n\nGo to **Developer Tools → YAML → Restart**, or use the system menu.\n\nClick **Submit** to close this dialog."
+      },
+      "update_token": {
+        "title": "Update GitHub token",
+        "description": "Replace the stored token with a new Personal Access Token.",
+        "data": {
+          "github_token": "GitHub token"
+        }
+      },
+      "edit_repository": {
+        "title": "{repo}",
+        "description": "Change how this repository is followed: latest `release`, a `tag`, a `branch` or a pinned `commit`, and which folder it installs into.\n\nNothing is downloaded here — run **Install / update** afterwards to apply the new ref.",
+        "data": {
+          "ref_type": "Track by",
+          "ref": "Tag / branch / commit (required unless tracking a release)",
+          "integration_name": "Integration folder name (leave blank to use the only one in the repo)"
+        }
+      },
+      "confirm_remove": {
+        "title": "{repo}",
+        "description": "Stop tracking this repository.\n\nLeave **Delete installed files** checked to remove `custom_components/{integration}/` as well. Uncheck it to keep the files on disk (Home Assistant keeps running the current version).",
+        "data": {
+          "delete_files": "Delete installed files from custom_components/"
+        }
+      },
+      "tracked_confirmation": {
+        "title": "Repository added",
+        "description": "**{repo}** is now tracked.\n\nNothing was downloaded. Run **Install / update** from the previous screen when you want its files in `custom_components/`."
+      },
+      "removed_confirmation": {
+        "title": "Repository removed",
+        "description": "**{repo}** is no longer tracked and its files {files}.\n\nIf the integration was loaded, it keeps running until you restart Home Assistant; a restart makes it disappear from the loaded integrations."
+      },
+      "install_failed": {
+        "title": "Added, but not installed",
+        "description": "**{repo}** is tracked, but its files were not installed:\n\n{reason}\n\nNothing was written to `custom_components/`. Open **Configure → Manage / install / update a tracked repository** to fix what went wrong and try again."
+      }
+    },
+    "error": {
+      "invalid_auth": "GitHub rejected the token.",
+      "cannot_connect": "Could not reach GitHub.",
+      "add_failed": "Could not add the repository: {detail}",
+      "action_failed": "Action failed: {detail}"
+    },
+    "abort": {
+      "no_repositories": "No repositories are tracked yet. Add one first."
+    }
+  },
+  "selector": {
+    "ref_type": {
+      "options": {
+        "release": "Release",
+        "tag": "Tag",
+        "branch": "Branch",
+        "commit": "Commit"
+      }
+    },
+    "repository_action": {
+      "options": {
+        "install": "Install / update",
+        "force_install": "Reinstall the same commit (force)",
+        "change_ref": "Change tracking ref (release/tag/branch/commit)",
+        "remove": "Remove from tracking"
+      }
+    }
+  },
+  "common": {
+    "tracking_saved": "**{repo}** saved. Nothing has been downloaded yet: run **Install / update** to apply it.",
+    "files_deleted": "were deleted from `custom_components/`",
+    "files_kept": "were left on disk",
+    "install_notification": "**{repo}** has been installed as `custom_components/{integration}/` (version: `{version}`).\n\n**Restart Home Assistant** to load the new integration. Until you restart, the files are on disk but not yet active.",
+    "install_notification_title": "Private Integrations: {integration} ready"
+  },
+  "services": {
+    "add_repository": {
+      "name": "Add repository",
+      "description": "Track a GitHub repository so it can be installed and kept up to date.",
+      "fields": {
+        "full_name": {
+          "name": "Repository",
+          "description": "Repository in 'owner/repo' format."
+        },
+        "ref_type": {
+          "name": "Ref type",
+          "description": "Which kind of GitHub ref to follow."
+        },
+        "ref": {
+          "name": "Ref",
+          "description": "Specific tag name, branch name, or commit SHA. Leave blank to follow the repository's default branch (ref_type=branch) or the latest release (ref_type=release)."
+        },
+        "integration_name": {
+          "name": "Integration name",
+          "description": "Folder name under custom_components/ to install. Required only if the repo contains more than one integration."
+        }
+      }
+    },
+    "remove_repository": {
+      "name": "Remove repository",
+      "description": "Stop tracking a repository and delete its installed files. Only files installed by this integration are deleted.",
+      "fields": {
+        "full_name": {
+          "name": "Repository",
+          "description": "Repository in 'owner/repo' format."
+        },
+        "delete_files": {
+          "name": "Delete installed files",
+          "description": "Also remove the integration folder under custom_components/. Disable it to stop tracking a repository and keep its files."
+        }
+      }
+    },
+    "install": {
+      "name": "Install",
+      "description": "Download a tracked repository and write it into custom_components/. A Home Assistant restart is required to load the new integration.",
+      "fields": {
+        "full_name": {
+          "name": "Repository",
+          "description": "Repository in 'owner/repo' format."
+        },
+        "force": {
+          "name": "Force reinstall",
+          "description": "Install even when the tracked ref already resolves to the version on disk."
+        }
+      }
+    },
+    "update": {
+      "name": "Update",
+      "description": "Re-install a tracked repository at its current ref (typically picking up a new release or branch HEAD). Restart Home Assistant after running.",
+      "fields": {
+        "full_name": {
+          "name": "Repository",
+          "description": "Repository in 'owner/repo' format."
+        },
+        "force": {
+          "name": "Force reinstall",
+          "description": "Install even when the tracked ref already resolves to the version on disk."
+        }
+      }
+    }
+  }
+}

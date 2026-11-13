@@ -1,0 +1,5 @@
+# Test stack for the Home Assistant release this integration is run against.
+# Home Assistant 2026.x needs Python 3.14, and so does the harness that pins it.
+pytest==9.0.3
+pytest-cov==7.1.0
+pytest-homeassistant-custom-component==0.13.375

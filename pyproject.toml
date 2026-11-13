@@ -1,0 +1,22 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+# Fail a run that loses coverage. The remaining uncovered lines are defensive
+# branches (path checks that validated names already make unreachable); 95
+# leaves room for them without letting a real regression through.
+addopts = [
+    "--cov=custom_components.private_integrations",
+    "--cov-report=term-missing",
+    "--cov-fail-under=95",
+]

@@ -1,0 +1,10 @@
+# Test stack for the oldest Home Assistant version this integration claims to
+# support (hacs.json "homeassistant"). It is deliberately separate from
+# requirements_test.txt: that one tracks a recent release.
+pytest==8.3.3
+pytest-cov==5.0.0
+pytest-homeassistant-custom-component==0.13.183
+
+# acme 2.x (pulled in by hass_nabucasa) still imports josepy.ComparableX509,
+# removed in josepy 2.x, and nothing in the chain upper-bounds it.
+josepy<2

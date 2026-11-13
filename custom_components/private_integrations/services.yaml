@@ -1,0 +1,104 @@
+add_repository:
+  name: Add repository
+  description: >-
+    Track a GitHub repository so it can be installed and kept up to date.
+  fields:
+    full_name:
+      name: Repository
+      description: Repository in 'owner/repo' format.
+      required: true
+      example: cypherbits/my-private-integration
+      selector:
+        text:
+    ref_type:
+      name: Ref type
+      description: Which kind of GitHub ref to follow.
+      default: branch
+      selector:
+        select:
+          options:
+            - release
+            - tag
+            - branch
+            - commit
+          translation_key: ref_type
+    ref:
+      name: Ref
+      description: >-
+        Specific tag name, branch name, or commit SHA. Leave blank to follow
+        the repository's default branch (ref_type=branch) or the latest
+        release (ref_type=release).
+      example: main
+      selector:
+        text:
+    integration_name:
+      name: Integration name
+      description: >-
+        Folder name under custom_components/ to install. Required only if
+        the repo contains more than one integration.
+      example: my_integration
+      selector:
+        text:
+
+remove_repository:
+  name: Remove repository
+  description: >-
+    Stop tracking a repository and delete its installed files. Only files
+    installed by this integration are deleted.
+  fields:
+    full_name:
+      name: Repository
+      description: Repository in 'owner/repo' format.
+      required: true
+      selector:
+        text:
+    delete_files:
+      name: Delete installed files
+      description: >-
+        Also remove the integration folder under custom_components/. Disable
+        it to stop tracking a repository and keep its files.
+      default: true
+      selector:
+        boolean:
+
+install:
+  name: Install
+  description: >-
+    Download a tracked repository and write it into custom_components/.
+    A Home Assistant restart is required to load the new integration.
+  fields:
+    full_name:
+      name: Repository
+      description: Repository in 'owner/repo' format.
+      required: true
+      selector:
+        text:
+    force:
+      name: Force reinstall
+      description: >-
+        Install even when the tracked ref already resolves to the version on
+        disk.
+      default: false
+      selector:
+        boolean:
+
+update:
+  name: Update
+  description: >-
+    Re-install a tracked repository at its current ref (typically picking up
+    a new release or branch HEAD). Restart Home Assistant after running.
+  fields:
+    full_name:
+      name: Repository
+      description: Repository in 'owner/repo' format.
+      required: true
+      selector:
+        text:
+    force:
+      name: Force reinstall
+      description: >-
+        Install even when the tracked ref already resolves to the version on
+        disk.
+      default: false
+      selector:
+        boolean:
