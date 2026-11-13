@@ -8,8 +8,7 @@ It does the job of the
 Assistant ships since 2026.11, but for repositories the Marketplace cannot
 reach: pull a custom integration out of a GitHub repo you own — public or
 private — and write it into your `custom_components/` folder. There is no
-central catalog; you add repos by their `owner/repo` name. HACS, which the
-Marketplace replaced in 2026.11, played a similar role on older releases.
+central catalog; you add repos by their `owner/repo` name.
 
 Useful when you maintain integrations that you do not want to publish (work
 projects, personal experiments, betas, internal tools) but still want to deploy
