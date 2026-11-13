@@ -102,6 +102,67 @@ If you are coming from HACS: Home Assistant removes HACS when it upgrades to
 that HACS used to update with a token are not readable by the Marketplace; add
 them here instead.
 
+## Upgrading from Private HACS
+
+The integration used to be called `private_hacs`. The new domain is
+`private_integrations`, so Home Assistant treats it as a different integration:
+install it as a new one, do not replace the old folder in place.
+
+The upgrade can keep everything:
+
+- The **installed integrations** (their folders and their config entries) are
+  not touched.
+- When you add **Private Integrations**, the setup flow looks for the old
+  `private_hacs` config entry and offers to import its GitHub token.
+- On first setup, the old `.storage/private_hacs.repositories` registry is
+  copied to `.storage/private_integrations.repositories`, and the
+  `.private_hacs.json` markers inside the installed folders are renamed to
+  `.private_integrations.json`. That is what keeps those folders updateable and
+  removable from the new tool.
+
+Create a Home Assistant backup before starting.
+
+1. Install this integration (Marketplace, HACS on 2026.10 or older, or manual).
+   Leave the old `custom_components/private_hacs/` folder in place for now.
+2. Go to **Settings → Devices & services → Add integration → Private
+   Integrations**. If the old entry is found, the first screen is **Import
+   Private HACS**: submit it to reuse the stored token. If the token has
+   expired, the normal token form appears and you can paste a new one.
+3. Finish the setup and restart Home Assistant when asked.
+4. Open **Configure → Manage / install / update** and check that the
+   repositories are listed. Run **Install / update** on one of them; if it says
+   it is already up to date, the folder was adopted correctly.
+5. Remove the old **Private HACS** config entry and the
+   `custom_components/private_hacs/` folder. The migration keeps the old
+   registry as a backup; delete `.storage/private_hacs.repositories` only after
+   you are happy with the result.
+6. Update automations and scripts: service names changed from
+   `private_hacs.*` to `private_integrations.*`. Pending restart notifications
+   from the old name can be dismissed.
+
+Notes:
+
+- Do not remove the old config entry **before** adding the new integration: its
+  removal deletes the old registry (the installed files stay). If the entry is
+  already gone, add the new integration with a token; the registry is imported
+  if the file still exists.
+- If a tracked folder has no marker at all, the migration adopts it only when
+  its `manifest.json` domain matches the folder. Otherwise the repository is
+  listed without files: set its integration folder name and install it again,
+  or create `.private_integrations.json` by hand.
+- The old `private_hacs` and the new `private_integrations` can be loaded at the
+  same time during the transition, but do not manage the same folders with both.
+  Remove the old one after checking the import.
+
+If the automatic import cannot run, the two files it uses can be moved by hand
+with Home Assistant stopped:
+
+```bash
+cp .storage/private_hacs.repositories .storage/private_integrations.repositories
+find custom_components -maxdepth 2 -name '.private*hacs*' -print
+# rename each marker to .private_integrations.json, keeping its contents
+```
+
 ## First-time setup
 
 1. **Settings → Devices & services → Add integration → "Private Integrations"**.
@@ -231,7 +292,7 @@ exists because:
   contacts GitHub when you ask it to.
 - It is private-first, with plain Home Assistant services and no separate UI
   panel.
-- It is small enough to read end-to-end (~2,200 lines, docstrings included) and
+- It is small enough to read end-to-end (~2,500 lines, docstrings included) and
   audit before running.
 - Private Integrations also works on Home Assistant 2024.11 through 2026.10,
   before the Marketplace existed. HACS covered part of that range and was

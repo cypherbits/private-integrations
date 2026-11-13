@@ -8,6 +8,10 @@
           "github_token": "Token de GitHub"
         }
       },
+      "migrate": {
+        "title": "Importar Private HACS",
+        "description": "Se ha encontrado una instalación anterior de Private HACS (**{title}**).\n\nSe importarán su token de GitHub y los repositorios seguidos, y se renombrarán los marcadores de propiedad de las integraciones instaladas. Las integraciones instaladas no se tocan.\n\nElimina la integración y la carpeta antiguas de Private HACS después de comprobar la importación."
+      },
       "reauth_confirm": {
         "title": "Volver a autenticar Private Integrations",
         "description": "El token de GitHub actual ya no es válido. Pega uno nuevo. Puedes [crear un PAT clásico]({classic_url}) o un [PAT de grano fino]({fine_url}).",

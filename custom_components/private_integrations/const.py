@@ -3,6 +3,10 @@ from __future__ import annotations
 
 DOMAIN = "private_integrations"
 
+#: Domain of the previous name of this integration. Used once, when upgrading,
+#: to import the GitHub token and the repository registry.
+OLD_DOMAIN = "private_hacs"
+
 CONF_GITHUB_TOKEN = "github_token"
 
 # Per-repo config keys

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.components import persistent_notification
@@ -21,6 +22,7 @@ from .const import (
     CONF_REF,
     CONF_REF_TYPE,
     DOMAIN,
+    OLD_DOMAIN,
     REF_TYPE_BRANCH,
     SERVICE_ADD_REPOSITORY,
     SERVICE_INSTALL,
@@ -35,6 +37,8 @@ from .manager import (
     get_manager,
     pending_restart_notification_id,
 )
+from .migration import migrate_private_hacs
+from .repository import Repository
 from .store import RepositoryStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,8 +85,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except GitHubError as err:
         _LOGGER.warning("GitHub API unavailable at startup: %s", err)
 
+    # Import the previous Private HACS registry and markers before the store is
+    # loaded: the new store is exactly what the migration writes.
+    config_dir = Path(hass.config.config_dir)
+    imported: list[dict[str, Any]] = []
+    try:
+        result = await hass.async_add_executor_job(
+            migrate_private_hacs, config_dir
+        )
+    except Exception:  # noqa: BLE001 - a migration problem must not break setup
+        _LOGGER.exception(
+            "Private Integrations: could not import a previous Private HACS "
+            "installation"
+        )
+    else:
+        imported = result.repositories
+        for action in result.actions:
+            _LOGGER.info("Private Integrations: %s", action)
+
+    if hass.config_entries.async_entries(OLD_DOMAIN):
+        _LOGGER.warning(
+            "Private Integrations: the previous Private HACS integration is "
+            "still configured; remove it after checking the imported "
+            "repositories"
+        )
+
     store = RepositoryStore(hass)
     await store.async_load()
+
+    if imported:
+        # Write the imported entries through Home Assistant's store API. The
+        # storage cache may still believe the new file does not exist, and this
+        # also validates the entries exactly as a normal load would.
+        for raw in imported:
+            try:
+                store.upsert(Repository.from_dict(raw))
+            except (TypeError, ValueError) as err:
+                _LOGGER.warning(
+                    "Private Integrations: skipping an unreadable imported "
+                    "repository: %s",
+                    err,
+                )
+        await store.async_save()
 
     custom_components_dir = Path(hass.config.path("custom_components"))
     if hass.state is CoreState.starting:

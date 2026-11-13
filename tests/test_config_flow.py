@@ -99,6 +99,73 @@ async def test_user_flow_errors(hass, aioclient_mock, status, error):
     assert result["errors"] == {"base": error}
 
 
+def _old_entry(hass, data=None, title="Private HACS (cypherbits)"):
+    entry = MockConfigEntry(
+        domain="private_hacs",
+        data=data if data is not None else {CONF_GITHUB_TOKEN: "ghp_old_token"},
+        title=title,
+        unique_id="private_hacs",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_a_previous_private_hacs_is_imported(
+    hass, aioclient_mock, isolated_config
+):
+    old_entry = _old_entry(hass)
+    aioclient_mock.get(USER_URL, json={"login": "cypherbits"})
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["step_id"] == "migrate"
+    assert result["description_placeholders"]["title"] == old_entry.title
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {}
+    )
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Private Integrations (cypherbits)"
+    assert result["data"] == {CONF_GITHUB_TOKEN: "ghp_old_token"}
+    assert hass.config_entries.async_entries("private_hacs") == [old_entry]
+
+
+async def test_an_expired_private_hacs_token_asks_for_a_new_one(
+    hass, aioclient_mock, isolated_config
+):
+    _old_entry(hass)
+    aioclient_mock.get(USER_URL, status=401)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["step_id"] == "migrate"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {}
+    )
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_a_private_hacs_entry_without_a_token_asks_for_one(
+    hass, isolated_config
+):
+    _old_entry(hass, data={})
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["step_id"] == "migrate"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {}
+    )
+    assert result["step_id"] == "user"
+    assert result["errors"] == {}
+
+
 async def test_options_manage_lists_repositories(hass, entry):
     store = hass.data[DOMAIN][entry.entry_id]["store"]
     store.upsert(Repository(full_name="owner/foo", ref="main"))

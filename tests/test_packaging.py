@@ -130,6 +130,18 @@ def test_every_options_step_exists_in_the_flow():
         ), f"strings.json documents a missing step: {step_id}"
 
 
+def test_every_config_step_exists_in_the_flow():
+    """The first-time flow, including the Private HACS import step."""
+    from custom_components.private_integrations.config_flow import (
+        PrivateIntegrationsConfigFlow,
+    )
+
+    for step_id in STRINGS["config"]["step"]:
+        assert hasattr(
+            PrivateIntegrationsConfigFlow, f"async_step_{step_id}"
+        ), f"strings.json documents a missing step: {step_id}"
+
+
 def test_the_detail_is_not_printed_twice():
     """Errors already carry the detail; repeating it in the body is noise."""
     for step in STRINGS["options"]["step"].values():

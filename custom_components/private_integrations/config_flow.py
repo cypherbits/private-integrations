@@ -43,6 +43,7 @@ from .const import (
     CONF_REF,
     CONF_REF_TYPE,
     DOMAIN,
+    OLD_DOMAIN,
     REF_TYPE_BRANCH,
     REF_TYPE_RELEASE,
     VALID_REF_TYPES,
@@ -93,6 +94,12 @@ async def _verify_token(
         return None, "cannot_connect"
 
 
+def _old_config_entry(hass: HomeAssistant) -> ConfigEntry | None:
+    """Return the config entry of the previous Private HACS installation."""
+    entries = hass.config_entries.async_entries(OLD_DOMAIN)
+    return entries[0] if entries else None
+
+
 class PrivateIntegrationsConfigFlow(ConfigFlow, domain=DOMAIN):
     """Initial setup: collect a GitHub PAT."""
 
@@ -101,6 +108,9 @@ class PrivateIntegrationsConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        if user_input is None and _old_config_entry(self.hass) is not None:
+            return await self.async_step_migrate()
+
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -117,10 +127,48 @@ class PrivateIntegrationsConfigFlow(ConfigFlow, domain=DOMAIN):
                     data={CONF_GITHUB_TOKEN: token},
                 )
 
+        return self._show_token_form(errors)
+
+    async def async_step_migrate(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Import the GitHub token of a previous Private HACS installation."""
+        old_entry = _old_config_entry(self.hass)
+        if old_entry is None:
+            return self._show_token_form()
+
+        if user_input is not None:
+            raw_token = old_entry.data.get(CONF_GITHUB_TOKEN, "")
+            token = raw_token.strip() if isinstance(raw_token, str) else ""
+            if not token:
+                return self._show_token_form()
+            await self.async_set_unique_id(DOMAIN)
+            self._abort_if_unique_id_configured()
+            user, error = await _verify_token(self.hass, token)
+            if error or user is None:
+                return self._show_token_form(
+                    {"base": error or "cannot_connect"}
+                )
+            return self.async_create_entry(
+                title=f"Private Integrations ({user.get('login', 'github')})",
+                data={CONF_GITHUB_TOKEN: token},
+            )
+
+        return self.async_show_form(
+            step_id="migrate",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "title": old_entry.title or "Private HACS"
+            },
+        )
+
+    def _show_token_form(
+        self, errors: dict[str, str] | None = None
+    ) -> ConfigFlowResult:
         return self.async_show_form(
             step_id="user",
             data_schema=_token_schema(),
-            errors=errors,
+            errors=errors or {},
             description_placeholders=TOKEN_PLACEHOLDERS,
         )
 
