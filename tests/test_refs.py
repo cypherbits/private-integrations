@@ -33,6 +33,9 @@ def test_parse_repo_reference(value, expected):
         "owner/re po",
         "-bad-/repo",
         "owner/repo?tab=readme",
+        "owner/..",
+        "owner/.",
+        "https://github.com/owner/..",
     ],
 )
 def test_parse_repo_reference_rejects(value):

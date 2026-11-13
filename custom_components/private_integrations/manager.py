@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,14 @@ class _Keep:
 
 
 _KEEP = _Keep()
+
+
+@dataclass(frozen=True)
+class InstallResult:
+    """Outcome of an install: the repository and whether files were written."""
+
+    repository: Repository
+    changed: bool
 
 
 class PrivateIntegrationsManager:
@@ -167,11 +176,12 @@ class PrivateIntegrationsManager:
         self,
         full_name_or_url: str,
         ref_type: str = REF_TYPE_BRANCH,
-        ref: str | None = "main",
+        ref: str | None = None,
         integration_name: str | None = None,
     ) -> Repository:
         full_name = self.parse_repo_input(full_name_or_url)
 
+        integration_name = (integration_name or "").strip() or None
         if integration_name is not None:
             try:
                 validate_integration_name(integration_name)
@@ -220,18 +230,22 @@ class PrivateIntegrationsManager:
 
     async def remove_repository(
         self, full_name_or_url: str, *, delete_files: bool = True
-    ) -> None:
+    ) -> bool:
+        """Stop tracking a repository; return True when its files were deleted."""
         full_name = self.parse_repo_input(full_name_or_url)
 
         async with self._lock:
             repo = self.store.get(full_name)
             if not repo:
                 raise HomeAssistantError(f"{full_name} is not tracked")
-            await self._remove_repository(repo, full_name, delete_files=delete_files)
+            return await self._remove_repository(
+                repo, full_name, delete_files=delete_files
+            )
 
     async def _remove_repository(
         self, repo: Repository, full_name: str, *, delete_files: bool
-    ) -> None:
+    ) -> bool:
+        removed = False
         if delete_files and repo.integration_name:
             dest_path = self._custom_components_dir / repo.integration_name
             owner = await self.hass.async_add_executor_job(
@@ -261,6 +275,7 @@ class PrivateIntegrationsManager:
 
         self.store.remove(full_name)
         await self.store.async_save()
+        return removed
 
     def _assert_owns_files(
         self, repo: Repository, dest_path: Path, owner: str | None
@@ -268,9 +283,9 @@ class PrivateIntegrationsManager:
         """Refuse to delete files this repository did not install."""
         if not dest_path.exists():
             return
+        if self._owns_folder(repo, owner):
+            return
         if owner is not None:
-            if self._owns_folder(repo, owner):
-                return
             if self.store.get(owner) is None:
                 raise HomeAssistantError(
                     f"custom_components/{dest_path.name} was installed by "
@@ -283,13 +298,10 @@ class PrivateIntegrationsManager:
                 "repository first, or stop tracking this one without deleting "
                 "its files"
             )
-        if repo.installed_version is not None or repo.installed_sha is not None:
-            # Installed by an older version of Private Integrations (no marker yet).
-            return
         raise HomeAssistantError(
             f"custom_components/{dest_path.name} was not installed by Private "
-            "Integrations; refusing to delete it. Remove it yourself, or stop tracking "
-            "the repository without deleting its files"
+            "Integrations; refusing to delete it. Remove it yourself, or stop "
+            "tracking the repository without deleting its files"
         )
 
     async def update_tracking(
@@ -314,13 +326,19 @@ class PrivateIntegrationsManager:
 
         new_integration_name = None
         if not isinstance(integration_name, _Keep):
-            new_integration_name = integration_name or None
+            new_integration_name = (integration_name or "").strip() or None
             if new_integration_name is not None:
                 try:
                     validate_integration_name(new_integration_name)
                 except InstallerError as err:
                     raise HomeAssistantError(str(err)) from err
                 self._assert_folder_is_free(full_name, new_integration_name)
+
+        if (
+            not isinstance(integration_name, _Keep)
+            and new_integration_name != repo.integration_name
+        ):
+            await self._assert_folder_change_is_safe(repo, new_integration_name)
 
         # Validate first, assign afterwards. The object returned by the store is
         # the live one: assigning ref_type before validating left the entry with
@@ -331,6 +349,11 @@ class PrivateIntegrationsManager:
         repo.ref_type = ref_type
         repo.ref = resolved
         if not isinstance(integration_name, _Keep):
+            if new_integration_name != repo.integration_name:
+                # The files on disk belong to the old folder, so the next
+                # install must not be skipped as "already installed".
+                repo.installed_version = None
+                repo.installed_sha = None
             repo.integration_name = new_integration_name
         self.store.upsert(repo)
         await self.store.async_save()
@@ -338,7 +361,7 @@ class PrivateIntegrationsManager:
 
     async def install_or_update(
         self, full_name_or_url: str, *, force: bool = False
-    ) -> Repository:
+    ) -> InstallResult:
         full_name = self.parse_repo_input(full_name_or_url)
 
         async with self._lock:
@@ -352,7 +375,7 @@ class PrivateIntegrationsManager:
 
     async def _install_or_update(
         self, repo: Repository, *, force: bool
-    ) -> Repository:
+    ) -> InstallResult:
         full_name = repo.full_name
         try:
             sha, version = await self._resolve_version(repo)
@@ -374,7 +397,7 @@ class PrivateIntegrationsManager:
                 repo.installed_version = version
                 self.store.upsert(repo)
                 await self.store.async_save()
-            return repo
+            return InstallResult(repo, changed=False)
 
         try:
             tarball = await self.client.download_tarball(full_name, sha)
@@ -442,7 +465,7 @@ class PrivateIntegrationsManager:
             notification_id=pending_restart_notification_id(integration_name),
         )
 
-        return repo
+        return InstallResult(repo, changed=True)
 
     async def _is_installed_at(self, repo: Repository, sha: str) -> bool:
         """True when the recorded version is on disk and matches ``sha``."""
@@ -456,15 +479,13 @@ class PrivateIntegrationsManager:
 
     @staticmethod
     def _owns_folder(repo: Repository, owner: str | None) -> bool:
-        """True when an integration folder belongs to this repository.
+        """True when the folder's ownership marker names this repository.
 
-        One rule for both deciding to replace and deciding to skip: a folder is
-        ours when the marker names this repository, or -- for installs made
-        before the marker existed -- when the entry records an install.
+        Only the marker counts. A folder without one was not created by Private
+        Integrations (or was replaced by another tool), so it is never touched,
+        even when the entry records a previous install of this repository.
         """
-        if owner is not None:
-            return owner.lower() == repo.full_name.lower()
-        return repo.installed_version is not None or repo.installed_sha is not None
+        return owner is not None and owner.lower() == repo.full_name.lower()
 
     def _select_integration(self, repo: Repository, names: list[str]) -> str:
         """Pick the integration to install, before anything is written to disk."""
@@ -481,8 +502,7 @@ class PrivateIntegrationsManager:
             raise HomeAssistantError(
                 f"{repo.full_name} has no custom_components/<integration>/ "
                 "folder, so there is nothing to install. Check that the "
-                "integration is at the root of the repository, the way HACS "
-                "expects"
+                "integration is at the root of the repository"
             )
         if len(names) > 1:
             raise HomeAssistantError(
@@ -566,6 +586,31 @@ class PrivateIntegrationsManager:
                     f"by {other.full_name}; a folder can only belong to one "
                     "tracked repository"
                 )
+
+    async def _assert_folder_change_is_safe(
+        self, repo: Repository, new_integration_name: str | None
+    ) -> None:
+        """Refuse to change the folder while this repository still owns files there.
+
+        Changing the folder does not move what is on disk. The old folder would
+        stay behind, still marked as this repository's, and neither this nor any
+        other repository could remove or take it over through the UI while this
+        one is tracked.
+        """
+        old_name = repo.integration_name
+        if old_name is None or old_name == new_integration_name:
+            return
+        dest_path = self._custom_components_dir / old_name
+        owner = await self.hass.async_add_executor_job(
+            installed_owner, dest_path
+        )
+        if self._owns_folder(repo, owner):
+            raise HomeAssistantError(
+                f"custom_components/{old_name} is installed from "
+                f"{repo.full_name}. Changing the integration folder would "
+                "leave it behind: remove the repository (with its files) and "
+                "add it again, or delete that folder first."
+            )
 
     async def _resolve_version(self, repo: Repository) -> tuple[str, str]:
         """Resolve the tracked ref to (commit SHA, version label).

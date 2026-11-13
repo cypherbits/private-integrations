@@ -1,0 +1,209 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Private Integrations",
+        "description": "Pega un token de acceso personal de GitHub. Hay dos formas de crearlo:\n\n- **[PAT clásico (con el ámbito 'repo' ya seleccionado)]({classic_url})** — funciona con cualquier repositorio privado al que tenga acceso tu cuenta.\n- **[PAT de grano fino]({fine_url})** — más seguro: limítalo solo a los repositorios concretos que quieras instalar, con **Permisos del repositorio → Contenidos: Solo lectura**.\n\nEl token se guarda en la entrada de configuración, que Home Assistant mantiene en `.storage/core.config_entries` como JSON sin cifrar: se oculta en la API, pero no está cifrado, así que trata tus copias de seguridad como secretos.",
+        "data": {
+          "github_token": "Token de GitHub"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Volver a autenticar Private Integrations",
+        "description": "El token de GitHub actual ya no es válido. Pega uno nuevo. Puedes [crear un PAT clásico]({classic_url}) o un [PAT de grano fino]({fine_url}).",
+        "data": {
+          "github_token": "Token de GitHub"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "GitHub rechazó el token.",
+      "cannot_connect": "No se pudo contactar con GitHub."
+    },
+    "abort": {
+      "already_configured": "Private Integrations ya está configurado.",
+      "reauth_successful": "Token actualizado."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Private Integrations",
+        "description": "¿Qué quieres hacer?",
+        "menu_options": {
+          "add_repository": "Añadir un repositorio",
+          "manage_repository": "Gestionar / instalar / actualizar un repositorio seguido",
+          "update_token": "Actualizar el token de GitHub"
+        }
+      },
+      "add_repository": {
+        "title": "Añadir un repositorio",
+        "description": "Pega la URL del repositorio de GitHub o 'owner/repo' y elige cómo seguirlo.\n\n_Después de una instalación correcta tendrás que reiniciar Home Assistant para que se cargue la nueva integración. Una notificación persistente te lo recordará._",
+        "data": {
+          "full_name": "Repositorio (URL u owner/repo)",
+          "ref_type": "Seguir por",
+          "ref": "Etiqueta / rama / commit (déjalo vacío para la rama predeterminada)",
+          "integration_name": "Nombre de la carpeta de la integración (solo si el repositorio tiene varias)",
+          "install_now": "Instalar inmediatamente después de añadirlo"
+        }
+      },
+      "manage_repository": {
+        "title": "Elige un repositorio seguido",
+        "description": "Elige sobre qué repositorio actuar.",
+        "data": {
+          "full_name": "Repositorio"
+        }
+      },
+      "repository_action": {
+        "title": "{repo}",
+        "description": "Elige una acción. **Instalar / actualizar** escribe en `custom_components/` y requiere reiniciar Home Assistant para que surta efecto.\n\n{notice}",
+        "data": {
+          "action": "Acción"
+        }
+      },
+      "installed_confirmation": {
+        "title": "Instalado",
+        "description": "**{repo}** está instalado como `custom_components/{integration}/` (versión: `{version}`).\n\n## Es necesario reiniciar\n\nHay que **reiniciar** Home Assistant para que se cargue la nueva integración. Los archivos están en disco pero aún no están activos.\n\nVe a **Herramientas para desarrolladores → YAML → Reiniciar**, o usa el menú del sistema.\n\nPulsa **Enviar** para cerrar este diálogo."
+      },
+      "up_to_date_confirmation": {
+        "title": "Ya está actualizado",
+        "description": "**{repo}** ya está instalado en la referencia seguida. No se ha descargado nada, así que no hace falta reiniciar."
+      },
+      "update_token": {
+        "title": "Actualizar el token de GitHub",
+        "description": "Sustituye el token guardado por un nuevo token de acceso personal.",
+        "data": {
+          "github_token": "Token de GitHub"
+        }
+      },
+      "edit_repository": {
+        "title": "{repo}",
+        "description": "Cambia cómo se sigue este repositorio: la última `release`, una `tag`, una `branch` o un `commit` fijado, y en qué carpeta se instala.\n\nAquí no se descarga nada: ejecuta **Instalar / actualizar** después para aplicar la nueva referencia.\n\nUna carpeta que ya contiene los archivos de este repositorio no se puede renombrar aquí: elimina el repositorio (con sus archivos) y vuelve a añadirlo.",
+        "data": {
+          "ref_type": "Seguir por",
+          "ref": "Etiqueta / rama / commit (obligatorio salvo que sigas una release)",
+          "integration_name": "Nombre de la carpeta de la integración (déjalo vacío para usar la única del repositorio)"
+        }
+      },
+      "confirm_remove": {
+        "title": "{repo}",
+        "description": "Deja de seguir este repositorio.\n\nDeja marcado **Eliminar archivos instalados** para eliminar también `custom_components/{integration}/`. Desmárcalo para conservar los archivos en disco (Home Assistant seguirá ejecutando la versión actual).",
+        "data": {
+          "delete_files": "Eliminar los archivos instalados de custom_components/"
+        }
+      },
+      "tracked_confirmation": {
+        "title": "Repositorio añadido",
+        "description": "**{repo}** ya se está siguiendo.\n\nNo se ha descargado nada. Ejecuta **Instalar / actualizar** en la pantalla anterior cuando quieras tener sus archivos en `custom_components/`."
+      },
+      "removed_confirmation": {
+        "title": "Repositorio eliminado",
+        "description": "**{repo}** ya no se sigue y sus archivos {files}.\n\nSi la integración estaba cargada, seguirá funcionando hasta que reinicies Home Assistant; al reiniciar desaparecerá de las integraciones cargadas."
+      },
+      "install_failed": {
+        "title": "Añadido, pero no instalado",
+        "description": "**{repo}** se está siguiendo, pero sus archivos no se han instalado:\n\n{reason}\n\nNo se ha escrito nada en `custom_components/`. Abre **Configurar → Gestionar / instalar / actualizar un repositorio seguido** para corregir el problema e inténtalo de nuevo."
+      }
+    },
+    "error": {
+      "invalid_auth": "GitHub rechazó el token.",
+      "cannot_connect": "No se pudo contactar con GitHub.",
+      "add_failed": "No se pudo añadir el repositorio: {detail}",
+      "action_failed": "La acción falló: {detail}"
+    },
+    "abort": {
+      "no_repositories": "Todavía no se sigue ningún repositorio. Añade uno primero."
+    }
+  },
+  "selector": {
+    "ref_type": {
+      "options": {
+        "release": "Release",
+        "tag": "Etiqueta",
+        "branch": "Rama",
+        "commit": "Commit"
+      }
+    },
+    "repository_action": {
+      "options": {
+        "install": "Instalar / actualizar",
+        "force_install": "Reinstalar el mismo commit (forzar)",
+        "change_ref": "Cambiar la referencia seguida (release/etiqueta/rama/commit)",
+        "remove": "Dejar de seguir"
+      }
+    }
+  },
+  "common": {
+    "tracking_saved": "**{repo}** guardado. Todavía no se ha descargado nada: ejecuta **Instalar / actualizar** para aplicarlo.",
+    "files_deleted": "se eliminaron de `custom_components/`",
+    "files_kept": "se dejaron en disco",
+    "install_notification": "**{repo}** se ha instalado como `custom_components/{integration}/` (versión: `{version}`).\n\n**Reinicia Home Assistant** para cargar la nueva integración. Hasta que reinicies, los archivos están en disco pero aún no están activos.",
+    "install_notification_title": "Private Integrations: {integration} listo"
+  },
+  "services": {
+    "add_repository": {
+      "name": "Añadir repositorio",
+      "description": "Sigue un repositorio de GitHub para poder instalarlo y mantenerlo actualizado.",
+      "fields": {
+        "full_name": {
+          "name": "Repositorio",
+          "description": "Repositorio en formato 'owner/repo'."
+        },
+        "ref_type": {
+          "name": "Tipo de referencia",
+          "description": "Qué tipo de referencia de GitHub seguir."
+        },
+        "ref": {
+          "name": "Referencia",
+          "description": "Nombre de etiqueta, nombre de rama o SHA de commit. Déjalo vacío para seguir la rama predeterminada del repositorio (ref_type=branch) o la última release (ref_type=release)."
+        },
+        "integration_name": {
+          "name": "Nombre de la integración",
+          "description": "Nombre de la carpeta dentro de custom_components/ que se va a instalar. Solo es obligatorio si el repositorio contiene más de una integración."
+        }
+      }
+    },
+    "remove_repository": {
+      "name": "Eliminar repositorio",
+      "description": "Deja de seguir un repositorio y elimina sus archivos instalados. Solo se eliminan los archivos instalados por esta integración.",
+      "fields": {
+        "full_name": {
+          "name": "Repositorio",
+          "description": "Repositorio en formato 'owner/repo'."
+        },
+        "delete_files": {
+          "name": "Eliminar archivos instalados",
+          "description": "Elimina también la carpeta de la integración dentro de custom_components/. Desactívalo para dejar de seguir un repositorio y conservar sus archivos."
+        }
+      }
+    },
+    "install": {
+      "name": "Instalar",
+      "description": "Descarga un repositorio seguido y lo escribe en custom_components/. Es necesario reiniciar Home Assistant para cargar la nueva integración.",
+      "fields": {
+        "full_name": {
+          "name": "Repositorio",
+          "description": "Repositorio en formato 'owner/repo'."
+        },
+        "force": {
+          "name": "Forzar reinstalación",
+          "description": "Instala incluso cuando la referencia seguida ya resuelve a la versión que está en disco."
+        }
+      }
+    },
+    "update": {
+      "name": "Actualizar",
+      "description": "Reinstala un repositorio seguido en su referencia actual (normalmente recogiendo una nueva release o la cabeza de la rama). Reinicia Home Assistant después de ejecutarlo.",
+      "fields": {
+        "full_name": {
+          "name": "Repositorio",
+          "description": "Repositorio en formato 'owner/repo'."
+        },
+        "force": {
+          "name": "Forzar reinstalación",
+          "description": "Instala incluso cuando la referencia seguida ya resuelve a la versión que está en disco."
+        }
+      }
+    }
+  }
+}

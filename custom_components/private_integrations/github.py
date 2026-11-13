@@ -31,6 +31,14 @@ class GitHubNotFoundError(GitHubError):
     """Raised on 404 from GitHub."""
 
 
+class GitHubUnprocessableError(GitHubError):
+    """Raised when GitHub cannot resolve the request (409/422).
+
+    The commits endpoint answers 422 ("No commit found for SHA") for a ref it
+    does not know and 409 for an empty repository; both mean "no such commit".
+    """
+
+
 class GitHubRateLimitError(GitHubError):
     """Raised when GitHub refuses a request because of a rate limit."""
 
@@ -96,6 +104,10 @@ class GitHubClient:
                 )
         if resp.status in (401, 403):
             raise GitHubAuthError(f"Auth failed ({resp.status}) for {url}")
+        if resp.status in (409, 422):
+            raise GitHubUnprocessableError(
+                f"GitHub could not resolve the request ({resp.status}) for {url}"
+            )
         raise GitHubError(f"GitHub error {resp.status} for {url}")
 
     async def _get_json(
@@ -154,14 +166,18 @@ class GitHubClient:
         return published[0] if published else None
 
     async def get_commit_sha(self, full_name: str, ref: str) -> str | None:
-        """Resolve a tag, branch or SHA to the commit it points at now."""
+        """Resolve a tag, branch or SHA to the commit it points at now.
+
+        GitHub reports an unknown ref as 422 (or 409 for an empty repository),
+        not as 404, so both are treated as "no such ref".
+        """
         url = (
             f"{GITHUB_API_BASE}/repos/{full_name}/commits/"
             f"{quote(ref, safe='')}"
         )
         try:
             data = await self._get_json(url)
-        except GitHubNotFoundError:
+        except (GitHubNotFoundError, GitHubUnprocessableError):
             return None
         sha = data.get("sha") if isinstance(data, dict) else None
         return sha if isinstance(sha, str) else None

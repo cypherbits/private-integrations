@@ -3,7 +3,11 @@ import pytest
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from custom_components.private_integrations import github
-from custom_components.private_integrations.github import GitHubClient, GitHubError
+from custom_components.private_integrations.github import (
+    GitHubClient,
+    GitHubError,
+    GitHubUnprocessableError,
+)
 
 USER_URL = "https://api.github.com/user"
 TARBALL_URL = "https://api.github.com/repos/owner/foo/tarball/main"
@@ -146,13 +150,23 @@ async def test_unknown_repository_is_not_found(hass, aioclient_mock):
         await client.get_repo("owner/foo")
 
 
-async def test_unknown_ref_resolves_to_none(hass, aioclient_mock):
+@pytest.mark.parametrize("status", [404, 409, 422])
+async def test_unknown_ref_resolves_to_none(hass, aioclient_mock, status):
+    """GitHub reports an unknown ref as 404, 409 (empty repo) or 422."""
     aioclient_mock.get(
-        "https://api.github.com/repos/owner/foo/commits/nope", status=404
+        "https://api.github.com/repos/owner/foo/commits/nope", status=status
     )
     client = GitHubClient(async_get_clientsession(hass), "token")
 
     assert await client.get_commit_sha("owner/foo", "nope") is None
+
+
+async def test_an_unprocessable_response_is_reported(hass, aioclient_mock):
+    aioclient_mock.get("https://api.github.com/repos/owner/foo", status=422)
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    with pytest.raises(GitHubUnprocessableError):
+        await client.get_repo("owner/foo")
 
 
 async def test_commit_sha_is_returned(hass, aioclient_mock):

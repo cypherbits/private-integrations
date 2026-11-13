@@ -31,13 +31,13 @@
         "title": "Private Integrations",
         "description": "What would you like to do?",
         "menu_options": {
-          "add_repository": "Add a private repository",
+          "add_repository": "Add a repository",
           "manage_repository": "Manage / install / update a tracked repository",
           "update_token": "Update the GitHub token"
         }
       },
       "add_repository": {
-        "title": "Add a private repository",
+        "title": "Add a repository",
         "description": "Paste the GitHub repository URL or 'owner/repo', then choose how to track it.\n\n_After a successful install you will need to restart Home Assistant for the new integration to load. A persistent notification will remind you._",
         "data": {
           "full_name": "Repository (URL or owner/repo)",
@@ -65,6 +65,10 @@
         "title": "Installed",
         "description": "**{repo}** is installed as `custom_components/{integration}/` (version: `{version}`).\n\n## Restart required\n\nHome Assistant must be **restarted** for the new integration to load. The files are on disk but not yet active.\n\nGo to **Developer Tools → YAML → Restart**, or use the system menu.\n\nClick **Submit** to close this dialog."
       },
+      "up_to_date_confirmation": {
+        "title": "Already up to date",
+        "description": "**{repo}** is already installed at the tracked ref. Nothing was downloaded, so no restart is needed."
+      },
       "update_token": {
         "title": "Update GitHub token",
         "description": "Replace the stored token with a new Personal Access Token.",
@@ -74,7 +78,7 @@
       },
       "edit_repository": {
         "title": "{repo}",
-        "description": "Change how this repository is followed: latest `release`, a `tag`, a `branch` or a pinned `commit`, and which folder it installs into.\n\nNothing is downloaded here — run **Install / update** afterwards to apply the new ref.",
+        "description": "Change how this repository is followed: latest `release`, a `tag`, a `branch` or a pinned `commit`, and which folder it installs into.\n\nNothing is downloaded here — run **Install / update** afterwards to apply the new ref.\n\nA folder that already holds this repository's files cannot be renamed here: remove the repository (with its files) and add it again.",
         "data": {
           "ref_type": "Track by",
           "ref": "Tag / branch / commit (required unless tracking a release)",

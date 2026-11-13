@@ -90,9 +90,11 @@ async def test_install_writes_files_and_marker(hass, aioclient_mock, manager):
     aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
     aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
 
-    repo = await manager.install_or_update("owner/foo")
+    result = await manager.install_or_update("owner/foo")
+    repo = result.repository
 
     dest = manager._custom_components_dir / "foo"
+    assert result.changed
     assert (dest / "manifest.json").is_file()
     assert (dest / "__init__.py").read_text() == "# version 1\n"
     assert is_managed(dest)
@@ -176,15 +178,17 @@ async def test_release_falls_back_to_prerelease(aioclient_mock, manager):
     )
     aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
 
-    repo = await manager.install_or_update("owner/foo")
+    result = await manager.install_or_update("owner/foo")
+    repo = result.repository
 
+    assert result.changed
     assert repo.installed_version == "v2.0.0-beta.1"
     assert repo.installed_sha == SHA
 
 
 async def test_missing_ref_is_reported(aioclient_mock, manager):
     track(manager)
-    aioclient_mock.get(f"{REPO_URL}/commits/main", status=404)
+    aioclient_mock.get(f"{REPO_URL}/commits/main", status=422)
 
     with pytest.raises(HomeAssistantError, match="not found"):
         await manager.install_or_update("owner/foo")
@@ -192,9 +196,8 @@ async def test_missing_ref_is_reported(aioclient_mock, manager):
 
 async def test_add_repository_uses_default_branch(aioclient_mock, manager):
     aioclient_mock.get(REPO_URL, json={"default_branch": "master"})
-    aioclient_mock.get(f"{REPO_URL}/commits/master", json={"sha": SHA})
 
-    repo = await manager.add_repository("owner/foo", ref_type="branch", ref="")
+    repo = await manager.add_repository("owner/foo")
 
     assert repo.ref == "master"
 
@@ -227,7 +230,7 @@ async def test_remove_deletes_a_folder_it_installed(hass, aioclient_mock, manage
     dest = manager._custom_components_dir / "foo"
     assert dest.is_dir()
 
-    await manager.remove_repository("owner/foo")
+    assert await manager.remove_repository("owner/foo") is True
 
     assert not dest.exists()
     assert manager.store.get("owner/foo") is None
@@ -272,6 +275,14 @@ async def test_remove_without_deleting_files(hass, manager):
     await manager.remove_repository("owner/foo", delete_files=False)
 
     assert (dest / "keep.txt").read_text() == "keep"
+    assert manager.store.get("owner/foo") is None
+
+
+async def test_remove_reports_when_there_were_no_files(hass, manager):
+    """Deleting a folder that is already gone must not claim it did anything."""
+    track(manager, integration_name="foo")
+
+    assert await manager.remove_repository("owner/foo") is False
     assert manager.store.get("owner/foo") is None
 
 
@@ -320,12 +331,14 @@ async def test_reinstalling_the_same_sha_changes_nothing(
     track(manager)
     aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
     aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
-    await manager.install_or_update("owner/foo")
+    first_install = await manager.install_or_update("owner/foo")
     target = manager._custom_components_dir / "foo" / "manifest.json"
     first = target.stat().st_ino
 
-    await manager.install_or_update("owner/foo")
+    second_install = await manager.install_or_update("owner/foo")
 
+    assert first_install.changed
+    assert not second_install.changed
     assert downloads(aioclient_mock) == 1
     assert target.stat().st_ino == first
 
@@ -480,19 +493,21 @@ async def test_installed_marker_lands_with_the_files(hass, aioclient_mock, manag
     assert marker["integration_name"] == "foo"
 
 
-async def test_legacy_folder_without_marker_is_not_reinstalled(
+async def test_a_folder_without_a_marker_is_never_replaced(
     hass, aioclient_mock, manager
 ):
-    """A folder installed before the marker existed still short-circuits."""
+    """Even a recorded install does not grant ownership: only the marker does."""
     dest = manager._custom_components_dir / "foo"
     dest.mkdir(parents=True)
     (dest / "manifest.json").write_text('{"domain": "foo"}')
     track(manager, integration_name="foo", installed_sha=SHA, installed_version="main")
     aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
+    aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
 
-    await manager.install_or_update("owner/foo")
+    with pytest.raises(HomeAssistantError, match="was not installed by Private"):
+        await manager.install_or_update("owner/foo")
 
-    assert "/tarball/" not in str(aioclient_mock.mock_calls)
+    assert dest.is_dir()
     assert read_marker(dest) is None
 
 
@@ -627,9 +642,8 @@ async def test_add_repository_reports_a_rate_limit(aioclient_mock, manager):
         await manager.add_repository("owner/foo")
 
 
-async def test_add_repository_requires_a_ref_for_a_branch(aioclient_mock, manager):
+async def test_a_blank_branch_ref_uses_the_default_branch(aioclient_mock, manager):
     aioclient_mock.get(REPO_URL, json={"default_branch": "develop"})
-    aioclient_mock.get(f"{REPO_URL}/commits/develop", json={"sha": SHA})
 
     repo = await manager.add_repository("owner/foo", ref_type="branch", ref="")
 
@@ -753,6 +767,16 @@ async def test_add_repository_without_an_integration_name(aioclient_mock, manage
     assert repo.integration_name is None
 
 
+async def test_add_repository_treats_a_blank_integration_name_as_none(
+    aioclient_mock, manager
+):
+    aioclient_mock.get(REPO_URL, json={"default_branch": "main"})
+
+    repo = await manager.add_repository("owner/foo", integration_name="   ")
+
+    assert repo.integration_name is None
+
+
 async def test_remove_without_an_installed_folder(hass, manager):
     track(manager, integration_name="foo")
 
@@ -808,16 +832,17 @@ async def test_update_tracking_rejects_an_unknown_ref_type(manager):
         await manager.update_tracking("owner/foo", "banana", "main")
 
 
-async def test_remove_deletes_a_legacy_folder_without_a_marker(hass, manager):
+async def test_remove_refuses_a_folder_without_a_marker(hass, manager):
     dest = manager._custom_components_dir / "foo"
     dest.mkdir(parents=True)
     (dest / "manifest.json").write_text('{"domain": "foo"}')
     track(manager, integration_name="foo", installed_sha=SHA, installed_version="main")
 
-    await manager.remove_repository("owner/foo")
+    with pytest.raises(HomeAssistantError, match="was not installed by Private"):
+        await manager.remove_repository("owner/foo")
 
-    assert not dest.exists()
-    assert manager.store.get("owner/foo") is None
+    assert dest.is_dir()
+    assert manager.store.get("owner/foo") is not None
 
 
 async def test_download_rate_limit_is_reported(aioclient_mock, manager):
@@ -838,7 +863,7 @@ async def test_a_failed_ref_change_leaves_the_tracking_untouched(
     aioclient_mock, manager
 ):
     repo = track(manager)
-    aioclient_mock.get(f"{REPO_URL}/commits/nope", status=404)
+    aioclient_mock.get(f"{REPO_URL}/commits/nope", status=422)
 
     with pytest.raises(HomeAssistantError, match="has no ref named 'nope'"):
         await manager.update_tracking("owner/foo", "tag", "nope")
@@ -863,7 +888,7 @@ async def test_update_tracking_rejects_a_ref_that_does_not_exist(
     aioclient_mock, manager
 ):
     track(manager)
-    aioclient_mock.get(f"{REPO_URL}/commits/v9.9.9", status=404)
+    aioclient_mock.get(f"{REPO_URL}/commits/v9.9.9", status=422)
 
     with pytest.raises(HomeAssistantError, match="has no ref named 'v9.9.9'"):
         await manager.update_tracking("owner/foo", "tag", "v9.9.9")
@@ -883,10 +908,10 @@ async def test_add_repository_rejects_a_ref_that_does_not_exist(
     aioclient_mock, manager
 ):
     aioclient_mock.get(REPO_URL, json={"default_branch": "main"})
-    aioclient_mock.get(f"{REPO_URL}/commits/main", status=404)
+    aioclient_mock.get(f"{REPO_URL}/commits/main", status=422)
 
     with pytest.raises(HomeAssistantError, match="has no ref named 'main'"):
-        await manager.add_repository("owner/foo")
+        await manager.add_repository("owner/foo", ref_type="branch", ref="main")
 
     assert manager.store.get("owner/foo") is None
 
@@ -943,6 +968,63 @@ async def test_update_tracking_can_clear_the_integration_name(
 
     await manager.update_tracking(
         "owner/foo", "branch", "main", integration_name=None
+    )
+
+    assert repo.integration_name is None
+
+
+async def test_update_tracking_refuses_to_orphan_installed_files(hass, manager):
+    """Changing the folder must not leave marked files no UI could reach."""
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    (dest / ".private_integrations.json").write_text(
+        json.dumps({"full_name": "owner/foo"})
+    )
+    repo = track(
+        manager,
+        integration_name="foo",
+        installed_version="main",
+        installed_sha=SHA,
+    )
+
+    with pytest.raises(HomeAssistantError, match="would leave it behind"):
+        await manager.update_tracking(
+            "owner/foo", "branch", "main", integration_name="bar"
+        )
+
+    assert repo.integration_name == "foo"
+    assert repo.installed_sha == SHA
+    assert dest.is_dir()
+
+
+async def test_update_tracking_clears_the_old_install_with_the_folder(
+    aioclient_mock, manager
+):
+    repo = track(
+        manager,
+        integration_name="foo",
+        installed_version="main",
+        installed_sha=SHA,
+    )
+    aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
+
+    await manager.update_tracking(
+        "owner/foo", "branch", "main", integration_name="bar"
+    )
+
+    assert repo.integration_name == "bar"
+    assert repo.installed_version is None
+    assert repo.installed_sha is None
+
+
+async def test_update_tracking_treats_a_blank_folder_as_no_folder(
+    aioclient_mock, manager
+):
+    repo = track(manager, integration_name="foo")
+    aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
+
+    await manager.update_tracking(
+        "owner/foo", "branch", "main", integration_name="   "
     )
 
     assert repo.integration_name is None

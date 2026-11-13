@@ -20,7 +20,7 @@ from typing import Any
 _LOGGER = logging.getLogger(__name__)
 
 #: Marker written inside every integration folder we install, so later installs
-#: and removals can tell our files apart from HACS/core/third-party ones.
+#: and removals can tell our files apart from core/third-party ones.
 MARKER_FILENAME = ".private_integrations.json"
 STAGING_PREFIX = ".private_integrations-staging-"
 

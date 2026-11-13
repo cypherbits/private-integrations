@@ -1,6 +1,7 @@
 """Consistency checks between the code, the strings and the service docs."""
 import json
 import re
+import string
 from pathlib import Path
 
 from custom_components.private_integrations import const
@@ -17,6 +18,9 @@ EN_TRANSLATIONS = json.loads(
 )
 ES_TRANSLATIONS = json.loads(
     (COMPONENT_DIR / "translations" / "es.json").read_text(encoding="utf-8")
+)
+ES_419_TRANSLATIONS = json.loads(
+    (COMPONENT_DIR / "translations" / "es-419.json").read_text(encoding="utf-8")
 )
 SERVICES_YAML = (COMPONENT_DIR / "services.yaml").read_text(encoding="utf-8")
 
@@ -39,8 +43,22 @@ def test_english_translations_match_the_source_strings():
 
 def test_spanish_translation_is_complete():
     """Every key in the source strings exists in ``es.json`` too."""
-    assert _key_tree(ES_TRANSLATIONS) == _key_tree(STRINGS)
-    assert "" not in _leaf_values(ES_TRANSLATIONS)
+    for translation in (ES_TRANSLATIONS, ES_419_TRANSLATIONS):
+        assert _key_tree(translation) == _key_tree(STRINGS)
+        assert "" not in _leaf_values(translation)
+    # es-419 exists because Home Assistant has no es-419 -> es fallback, and
+    # the two Spanish files are kept identical.
+    assert ES_419_TRANSLATIONS == ES_TRANSLATIONS
+
+
+def test_the_translations_keep_the_same_placeholders():
+    """A translated string must not drop or rename a placeholder."""
+    english = dict(_flatten(EN_TRANSLATIONS))
+    for translation in (ES_TRANSLATIONS, ES_419_TRANSLATIONS):
+        translated = dict(_flatten(translation))
+        assert set(translated) == set(english)
+        for key, value in english.items():
+            assert _placeholders(value) == _placeholders(translated[key]), key
 
 
 def test_the_marketplace_can_read_the_repository():
@@ -65,7 +83,7 @@ def test_every_selector_option_is_translated():
         const.ACTION_REMOVE,
     }
 
-    for translation in (EN_TRANSLATIONS, ES_TRANSLATIONS):
+    for translation in (EN_TRANSLATIONS, ES_TRANSLATIONS, ES_419_TRANSLATIONS):
         for selector in ("ref_type", "repository_action"):
             assert all(translation["selector"][selector]["options"].values())
 
@@ -125,6 +143,23 @@ def _key_tree(value):
     if isinstance(value, dict):
         return {key: _key_tree(item) for key, item in value.items()}
     return None
+
+
+def _flatten(value, prefix=""):
+    """Yield ``(dotted key, text)`` for every leaf of a translation tree."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _flatten(item, f"{prefix}.{key}" if prefix else key)
+    else:
+        yield prefix, value
+
+
+def _placeholders(value: str) -> set[str]:
+    return {
+        name
+        for _, name, _, _ in string.Formatter().parse(value)
+        if name is not None
+    }
 
 
 def _leaf_values(value):

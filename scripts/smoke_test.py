@@ -206,7 +206,7 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
         with (
             patch(
                 f"custom_components.{INTEGRATION}.GitHubClient.get_repo",
-                return_value={"default_branch": "main"},
+                return_value={"default_branch": "trunk"},
             ),
             patch(
                 f"custom_components.{INTEGRATION}.GitHubClient.get_commit_sha",
@@ -219,11 +219,12 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
         ):
             repo_entry = await manager.add_repository(f"owner/{INSTALLED}")
             check(
-                repo_entry.ref == "main",
+                repo_entry.ref == "trunk",
                 "the default branch is picked",
                 repo_entry.ref,
             )
-            await manager.install_or_update(f"owner/{INSTALLED}")
+            first_install = await manager.install_or_update(f"owner/{INSTALLED}")
+            check(first_install.changed, "the first install writes files")
 
         folder = config_dir / "custom_components" / INSTALLED
         check(folder.is_dir(), "the files are on disk")
@@ -244,7 +245,8 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
             f"custom_components.{INTEGRATION}.GitHubClient.get_commit_sha",
             return_value=SHA,
         ):
-            await manager.install_or_update(f"owner/{INSTALLED}")
+            second_install = await manager.install_or_update(f"owner/{INSTALLED}")
+        check(not second_install.changed, "a repeated install changes nothing")
         check(folder.is_dir(), "the folder is still there")
 
         print("9. removing it")

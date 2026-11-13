@@ -31,13 +31,13 @@
         "title": "Private Integrations",
         "description": "¿Qué quieres hacer?",
         "menu_options": {
-          "add_repository": "Añadir un repositorio privado",
+          "add_repository": "Añadir un repositorio",
           "manage_repository": "Gestionar / instalar / actualizar un repositorio seguido",
           "update_token": "Actualizar el token de GitHub"
         }
       },
       "add_repository": {
-        "title": "Añadir un repositorio privado",
+        "title": "Añadir un repositorio",
         "description": "Pega la URL del repositorio de GitHub o 'owner/repo' y elige cómo seguirlo.\n\n_Después de una instalación correcta tendrás que reiniciar Home Assistant para que se cargue la nueva integración. Una notificación persistente te lo recordará._",
         "data": {
           "full_name": "Repositorio (URL u owner/repo)",
@@ -65,6 +65,10 @@
         "title": "Instalado",
         "description": "**{repo}** está instalado como `custom_components/{integration}/` (versión: `{version}`).\n\n## Es necesario reiniciar\n\nHay que **reiniciar** Home Assistant para que se cargue la nueva integración. Los archivos están en disco pero aún no están activos.\n\nVe a **Herramientas para desarrolladores → YAML → Reiniciar**, o usa el menú del sistema.\n\nPulsa **Enviar** para cerrar este diálogo."
       },
+      "up_to_date_confirmation": {
+        "title": "Ya está actualizado",
+        "description": "**{repo}** ya está instalado en la referencia seguida. No se ha descargado nada, así que no hace falta reiniciar."
+      },
       "update_token": {
         "title": "Actualizar el token de GitHub",
         "description": "Sustituye el token guardado por un nuevo token de acceso personal.",
@@ -74,7 +78,7 @@
       },
       "edit_repository": {
         "title": "{repo}",
-        "description": "Cambia cómo se sigue este repositorio: la última `release`, una `tag`, una `branch` o un `commit` fijado, y en qué carpeta se instala.\n\nAquí no se descarga nada: ejecuta **Instalar / actualizar** después para aplicar la nueva referencia.",
+        "description": "Cambia cómo se sigue este repositorio: la última `release`, una `tag`, una `branch` o un `commit` fijado, y en qué carpeta se instala.\n\nAquí no se descarga nada: ejecuta **Instalar / actualizar** después para aplicar la nueva referencia.\n\nUna carpeta que ya contiene los archivos de este repositorio no se puede renombrar aquí: elimina el repositorio (con sus archivos) y vuelve a añadirlo.",
         "data": {
           "ref_type": "Seguir por",
           "ref": "Etiqueta / rama / commit (obligatorio salvo que sigas una release)",

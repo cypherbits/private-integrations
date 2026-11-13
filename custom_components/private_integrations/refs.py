@@ -28,4 +28,8 @@ def parse_repo_reference(value: str) -> str:
         raise ValueError(f"Could not parse repository reference: {value!r}")
 
     repo = match.group("repo").removesuffix(".git")
+    if repo in {".", ".."}:
+        # GitHub itself rejects these names, and they would turn the API URL
+        # into a different path once the request is normalised.
+        raise ValueError(f"Could not parse repository reference: {value!r}")
     return f"{match.group('owner')}/{repo}"

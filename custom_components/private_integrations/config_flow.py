@@ -218,7 +218,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             else:
                 if user_input.get(CONF_INSTALL_NOW, True):
                     try:
-                        await manager.install_or_update(repo.full_name)
+                        result = await manager.install_or_update(repo.full_name)
                     except HomeAssistantError as err:
                         # Keep the repository tracked. It was added successfully
                         # -- the URL, the token and the ref are fine -- and only
@@ -235,11 +235,12 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                         self._error_detail = str(err)
                         return await self.async_step_install_failed()
                     self._installed_repo_name = repo.full_name
-                    return await self.async_step_installed_confirmation()
-                if not errors:
-                    # install_now was unchecked — repo registered, no install
-                    self._installed_repo_name = repo.full_name
-                    return await self.async_step_tracked_confirmation()
+                    if result.changed:
+                        return await self.async_step_installed_confirmation()
+                    return await self.async_step_up_to_date_confirmation()
+                # install_now was unchecked — repo registered, no install
+                self._installed_repo_name = repo.full_name
+                return await self.async_step_tracked_confirmation()
 
         schema = vol.Schema(
             {
@@ -320,7 +321,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             if action == ACTION_REMOVE:
                 return await self.async_step_confirm_remove()
             try:
-                await manager.install_or_update(
+                result = await manager.install_or_update(
                     full_name, force=action == ACTION_FORCE_INSTALL
                 )
             except HomeAssistantError as err:
@@ -328,7 +329,9 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 self._error_detail = str(err)
             else:
                 self._installed_repo_name = full_name
-                return await self.async_step_installed_confirmation()
+                if result.changed:
+                    return await self.async_step_installed_confirmation()
+                return await self.async_step_up_to_date_confirmation()
 
         repo = manager.store.get(full_name)
         title_label = _repo_label(repo) if repo else full_name
@@ -443,7 +446,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         if user_input is not None:
             delete_files = user_input.get(CONF_DELETE_FILES, True)
             try:
-                await manager.remove_repository(
+                files_removed = await manager.remove_repository(
                     full_name, delete_files=delete_files
                 )
             except HomeAssistantError as err:
@@ -451,7 +454,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 self._error_detail = str(err)
             else:
                 self._removed_repo_name = full_name
-                self._removed_files = delete_files and bool(repo.integration_name)
+                self._removed_files = files_removed
                 return await self.async_step_removed_confirmation()
 
         schema = vol.Schema({vol.Optional(CONF_DELETE_FILES, default=True): bool})
@@ -486,6 +489,22 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                     repo.installed_version
                     or (repo.installed_sha[:7] if repo and repo.installed_sha else "?")
                 ) if repo else "?",
+            },
+            last_step=True,
+        )
+
+    async def async_step_up_to_date_confirmation(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """The tracked ref already matches the files on disk."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="up_to_date_confirmation",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "repo": getattr(self, "_installed_repo_name", "") or "?"
             },
             last_step=True,
         )

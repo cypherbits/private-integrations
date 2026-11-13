@@ -116,10 +116,10 @@ them here instead.
    encrypted. Treat Home Assistant backups as secrets and rotate the token if
    one leaks. The token is redacted from the Home Assistant API.
 
-## Adding a private repository (UI)
+## Adding a repository (UI)
 
 1. **Settings → Devices & services → Private Integrations → Configure**.
-2. Pick **"Add a private repository"**.
+2. Pick **"Add a repository"**.
 3. Paste the repo URL (`https://github.com/owner/repo`) or `owner/repo`.
 4. Choose how to track it. The default is **branch**, leaving the ref empty
    to follow the repository's default branch — which fits a personal "I push
@@ -149,13 +149,15 @@ lets you pick a tracked repo and:
   and swapped into place, so a failed download or a malformed repository
   leaves the working version untouched. Restart Home Assistant afterwards to
   load the new code. When the tracked ref already resolves to the commit on
-  disk it does nothing.
+  disk it does nothing, and the dialog says so instead of asking for a restart.
 - **Reinstall the same commit (force)** — what the `force` option of the
   services does, for when you want the files rewritten anyway.
 - **Change tracking ref and folder** — switch between release, tag, branch or
   commit without reinstalling or losing the tracking history, and fix which
   folder under `custom_components/` the repository installs into. Run
-  **Install / update** afterwards to apply the new ref.
+  **Install / update** afterwards to apply the new ref. Once the repository has
+  files installed, the folder cannot be changed here: remove the repository
+  (with its files) and add it again.
 - **Remove from tracking** — stop tracking the repository. Files are deleted
   only if you leave the **Delete installed files** box checked; uncheck it to
   keep the integration running while you move it to another tool.
@@ -170,6 +172,10 @@ exception is a folder whose owner is no longer tracked -- after removing a
 repository with **Delete installed files** unchecked -- which a new repository
 can take over instead of leaving it unusable.
 
+A folder without that marker is always treated as foreign, even when it looks
+like the integration this repository provides: Private Integrations never
+overwrites or deletes it. Delete it manually if you want to take it over.
+
 There is no background polling. Private Integrations only contacts GitHub when you
 explicitly add, install, or update a repo.
 
@@ -183,7 +189,7 @@ service: private_integrations.add_repository
 data:
   full_name: https://github.com/cypherbits/my-private-integration
   ref_type: release      # release | tag | branch | commit
-  # ref: v1.2.0          # required for tag/branch/commit
+  # ref: v1.2.0          # required for tag/commit; blank branch = default branch
   # integration_name: my_integration   # only if the repo has multiple integrations
 ```
 
@@ -197,8 +203,8 @@ Options on those services:
   nothing).
 - `delete_files: false` on `remove_repository` stops tracking the repository and
   leaves `custom_components/<integration>/` alone. Deletion only ever removes a
-  folder this repository installed; anything else is refused with an error
-  naming the owner.
+  folder this repository installed; anything else is refused with an error that
+  names its owner, or says that the folder has no ownership marker.
 
 ## Repository layout requirements
 

@@ -223,6 +223,39 @@ async def test_options_remove_keeps_files_when_unchecked(hass, entry):
     )
 
 
+async def test_remove_reports_files_kept_when_there_was_nothing_to_delete(
+    hass, entry
+):
+    """The confirmation describes what happened, not what was requested."""
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+    store.upsert(
+        Repository(
+            full_name="owner/foo",
+            ref_type="branch",
+            ref="main",
+            integration_name="foo",
+        )
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "manage_repository"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FULL_NAME: "owner/foo"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"action": "remove"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"delete_files": True}
+    )
+
+    assert result["step_id"] == "removed_confirmation"
+    assert result["description_placeholders"]["files"] == "were left on disk"
+    assert store.get("owner/foo") is None
+
+
 async def test_options_force_reinstall(hass, entry, monkeypatch):
     """The flow can ask for a reinstall of an unchanged commit."""
     from homeassistant.exceptions import HomeAssistantError
@@ -426,6 +459,34 @@ async def test_add_repository_can_install_immediately(hass, entry, aioclient_moc
     assert result["step_id"] == "installed_confirmation"
     assert result["description_placeholders"]["integration"] == "foo"
     assert store.get("owner/foo").installed_sha == SHA
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {}
+    )
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+
+
+async def test_add_repository_that_is_already_installed(
+    hass, entry, aioclient_mock, monkeypatch
+):
+    from custom_components.private_integrations.manager import (
+        InstallResult,
+        PrivateIntegrationsManager,
+    )
+
+    async def fake_install(self, full_name, *, force=False):
+        return InstallResult(self.store.get(full_name), changed=False)
+
+    monkeypatch.setattr(PrivateIntegrationsManager, "install_or_update", fake_install)
+    aioclient_mock.get(REPO_URL, json={"default_branch": "main"})
+
+    result = await _open_add(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], _add_input(install_now=True)
+    )
+
+    assert result["step_id"] == "up_to_date_confirmation"
+    assert result["description_placeholders"]["repo"] == "owner/foo"
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {}
@@ -673,6 +734,42 @@ async def test_install_from_the_manage_step_reaches_the_confirmation(
     )
 
     assert result["step_id"] == "installed_confirmation"
+
+
+async def test_options_install_that_changes_nothing_says_so(
+    hass, entry, monkeypatch
+):
+    from custom_components.private_integrations.manager import (
+        InstallResult,
+        PrivateIntegrationsManager,
+    )
+
+    async def fake_install(self, full_name, *, force=False):
+        return InstallResult(self.store.get(full_name), changed=False)
+
+    monkeypatch.setattr(PrivateIntegrationsManager, "install_or_update", fake_install)
+    hass.data[DOMAIN][entry.entry_id]["store"].upsert(
+        Repository(full_name="owner/foo", ref="main")
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "manage_repository"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FULL_NAME: "owner/foo"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"action": "install"}
+    )
+
+    assert result["step_id"] == "up_to_date_confirmation"
+    assert result["description_placeholders"]["repo"] == "owner/foo"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {}
+    )
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
 
 
 async def test_change_ref_aborts_when_the_repository_vanished(hass, entry):
