@@ -6,6 +6,7 @@ The options flow ("Configure" button) is the day-to-day UI for managing repos.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -29,6 +30,11 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
+from .catalog import (
+    MAX_REPOSITORIES,
+    Candidate,
+    async_detect_integrations,
+)
 from .const import (
     ACTION_CHANGE_REF,
     ACTION_FORCE_INSTALL,
@@ -48,7 +54,13 @@ from .const import (
     REF_TYPE_RELEASE,
     VALID_REF_TYPES,
 )
-from .github import GitHubAuthError, GitHubClient, GitHubError
+from .github import (
+    GitHubAuthError,
+    GitHubClient,
+    GitHubError,
+    GitHubRateLimitError,
+)
+from .installer import installed_integrations
 from .localize import async_translate
 from .manager import get_manager
 from .repository import Repository
@@ -230,13 +242,61 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         return self.async_show_menu(
             step_id="init",
             menu_options=[
-                "add_repository",
                 "manage_repository",
+                "add_repository",
+                "discover",
                 "update_token",
             ],
         )
 
     # --- Add ----------------------------------------------------------------
+
+    async def _add_and_install(
+        self,
+        *,
+        full_name: str,
+        ref_type: str,
+        ref: str | None,
+        integration_name: str | None,
+        install_now: bool,
+    ) -> ConfigFlowResult | None:
+        """Track a repository and optionally install it, shared by both add paths.
+
+        Returns the next screen, or ``None`` when adding failed -- the caller
+        reports it -- so the manual form and the discovered-proposal screen
+        cannot drift apart.
+        """
+        manager = get_manager(self.hass)
+        try:
+            repo = await manager.add_repository(
+                full_name_or_url=full_name,
+                ref_type=ref_type,
+                ref=ref,
+                integration_name=integration_name,
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning("add_repository failed for %r: %s", full_name, err)
+            self._error_detail = str(err)
+            return None
+
+        self._installed_repo_name = repo.full_name
+        if not install_now:
+            # install_now was unchecked — repo registered, no install
+            return await self.async_step_tracked_confirmation()
+        try:
+            result = await manager.install_or_update(repo.full_name)
+        except HomeAssistantError as err:
+            # Keep the repository tracked. It was added successfully -- the URL,
+            # the token and the ref are fine -- and only the download or the
+            # extraction failed. Untracking it meant retyping everything to
+            # retry, and the usual causes (the wrong integration folder, a ref
+            # that moved) are fixable from the manage screen.
+            _LOGGER.warning("install_or_update failed for %s: %s", repo.full_name, err)
+            self._error_detail = str(err)
+            return await self.async_step_install_failed()
+        if result.changed:
+            return await self.async_step_installed_confirmation()
+        return await self.async_step_up_to_date_confirmation()
 
     async def async_step_add_repository(
         self, user_input: dict[str, Any] | None = None
@@ -245,50 +305,16 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         self._error_detail = ""
 
         if user_input is not None:
-            manager = get_manager(self.hass)
-            try:
-                repo = await manager.add_repository(
-                    full_name_or_url=user_input[CONF_FULL_NAME],
-                    ref_type=user_input[CONF_REF_TYPE],
-                    ref=(user_input.get(CONF_REF) or None),
-                    integration_name=(
-                        user_input.get(CONF_INTEGRATION_NAME) or None
-                    ),
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning(
-                    "add_repository failed for %r: %s",
-                    user_input.get(CONF_FULL_NAME),
-                    err,
-                )
-                errors["base"] = "add_failed"
-                self._error_detail = str(err)
-            else:
-                if user_input.get(CONF_INSTALL_NOW, True):
-                    try:
-                        result = await manager.install_or_update(repo.full_name)
-                    except HomeAssistantError as err:
-                        # Keep the repository tracked. It was added successfully
-                        # -- the URL, the token and the ref are fine -- and only
-                        # the download or the extraction failed. Untracking it
-                        # meant retyping everything to retry, and the usual
-                        # causes (the wrong integration folder, a ref that moved)
-                        # are fixable from the manage screen.
-                        _LOGGER.warning(
-                            "install_or_update failed for %s: %s",
-                            repo.full_name,
-                            err,
-                        )
-                        self._installed_repo_name = repo.full_name
-                        self._error_detail = str(err)
-                        return await self.async_step_install_failed()
-                    self._installed_repo_name = repo.full_name
-                    if result.changed:
-                        return await self.async_step_installed_confirmation()
-                    return await self.async_step_up_to_date_confirmation()
-                # install_now was unchecked — repo registered, no install
-                self._installed_repo_name = repo.full_name
-                return await self.async_step_tracked_confirmation()
+            result = await self._add_and_install(
+                full_name=user_input[CONF_FULL_NAME],
+                ref_type=user_input[CONF_REF_TYPE],
+                ref=user_input.get(CONF_REF) or None,
+                integration_name=user_input.get(CONF_INTEGRATION_NAME) or None,
+                install_now=user_input.get(CONF_INSTALL_NOW, True),
+            )
+            if result is not None:
+                return result
+            errors["base"] = "add_failed"
 
         schema = vol.Schema(
             {
@@ -318,11 +344,168 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             },
         )
 
+    # --- Discover -----------------------------------------------------------
+
+    async def async_step_discover(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Look for integrations in every repository the token can read.
+
+        Nothing is cached: the answer depends on what the repositories look
+        like right now, and it is the user who asked for the list.
+        """
+        if user_input is not None:
+            # This screen is also the "nothing to offer / cannot ask GitHub"
+            # result; submitting it goes back to the menu.
+            return await self.async_step_init()
+
+        manager = get_manager(self.hass)
+        installed = await self.hass.async_add_executor_job(
+            installed_integrations,
+            Path(self.hass.config.path("custom_components")),
+        )
+        try:
+            discovery = await async_detect_integrations(
+                manager.client,
+                tracked={repo.full_name for repo in manager.store.all()},
+                installed=installed,
+            )
+        except GitHubRateLimitError as err:
+            return self._show_discover(
+                "rate_limited", manager.rate_limit_message(err)
+            )
+        except GitHubAuthError:
+            return self._show_discover("invalid_auth", "")
+        except GitHubError as err:
+            _LOGGER.warning("Discovery failed: %s", err)
+            return self._show_discover("cannot_connect", "")
+
+        if not discovery.candidates:
+            return self._show_discover(
+                "no_candidates", "", inspected=discovery.inspected
+            )
+
+        _LOGGER.debug(
+            "Discovery offered %s integration(s) after checking %s "
+            "repositories%s",
+            len(discovery.candidates),
+            discovery.inspected,
+            " (list truncated)" if discovery.truncated else "",
+        )
+        self._candidates = discovery.candidates
+        return await self.async_step_proposals()
+
+    def _show_discover(
+        self, error: str, detail: str, *, inspected: int = 0
+    ) -> ConfigFlowResult:
+        return self.async_show_form(
+            step_id="discover",
+            data_schema=vol.Schema({}),
+            errors={"base": error},
+            description_placeholders={
+                "limit": str(MAX_REPOSITORIES),
+                "inspected": str(inspected),
+                "detail": detail,
+            },
+        )
+
+    async def async_step_proposals(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """The candidates: what the token can see that is not tracked yet."""
+        candidates: list[Candidate] = list(getattr(self, "_candidates", []))
+        if not candidates:
+            return await self.async_step_discover()
+
+        if user_input is not None:
+            selected = user_input[CONF_FULL_NAME]
+            self._selected_candidate = next(
+                (candidate for candidate in candidates if candidate.key == selected),
+                None,
+            )
+            if self._selected_candidate is None:
+                return self.async_abort(reason="no_candidates")
+            return await self.async_step_proposal()
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_FULL_NAME, default=candidates[0].key
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(
+                                value=candidate.key, label=candidate.label
+                            )
+                            for candidate in candidates
+                        ],
+                        mode=SelectSelectorMode.LIST,
+                    )
+                )
+            }
+        )
+        return self.async_show_form(
+            step_id="proposals",
+            data_schema=schema,
+            description_placeholders={"count": str(len(candidates))},
+        )
+
+    async def async_step_proposal(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm one candidate: how to follow it, and whether to install it."""
+        errors: dict[str, str] = {}
+        self._error_detail = ""
+        candidate: Candidate | None = getattr(self, "_selected_candidate", None)
+        if candidate is None:
+            return self.async_abort(reason="no_candidates")
+
+        if user_input is not None:
+            result = await self._add_and_install(
+                full_name=candidate.full_name,
+                ref_type=user_input[CONF_REF_TYPE],
+                ref=user_input.get(CONF_REF) or None,
+                integration_name=candidate.integration_name,
+                install_now=user_input.get(CONF_INSTALL_NOW, True),
+            )
+            if result is not None:
+                return result
+            errors["base"] = "add_failed"
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_REF_TYPE, default=REF_TYPE_BRANCH
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=list(VALID_REF_TYPES),
+                        mode=SelectSelectorMode.DROPDOWN,
+                        translation_key="ref_type",
+                    )
+                ),
+                vol.Optional(CONF_REF, default=""): str,
+                vol.Optional(CONF_INSTALL_NOW, default=True): bool,
+            }
+        )
+        return self.async_show_form(
+            step_id="proposal",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "repo": candidate.full_name,
+                "integration": candidate.integration_name,
+                "version": candidate.version or "?",
+                "branch": candidate.default_branch,
+                "detail": self._error_detail,
+            },
+        )
+
     # --- Manage existing ----------------------------------------------------
 
     async def async_step_manage_repository(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """The list: every tracked repository and what is on disk for it."""
         manager = get_manager(self.hass)
         repos = manager.store.all()
 
@@ -344,14 +527,32 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                             )
                             for r in repos
                         ],
-                        mode=SelectSelectorMode.DROPDOWN,
+                        # A list, not a dropdown: this screen is meant to be
+                        # read like the Marketplace's installed tab -- one row
+                        # per integration, with its version next to it.
+                        mode=SelectSelectorMode.LIST,
                     )
                 )
             }
         )
         return self.async_show_form(
-            step_id="manage_repository", data_schema=schema
+            step_id="manage_repository",
+            data_schema=schema,
+            description_placeholders={
+                "count": str(len(repos)),
+                "other": str(await self._count_unmanaged(repos)),
+            },
         )
+
+    async def _count_unmanaged(self, repos: list[Repository]) -> int:
+        """Integrations on disk that no tracked repository here installed."""
+        folders = await self.hass.async_add_executor_job(
+            installed_integrations,
+            Path(self.hass.config.path("custom_components")),
+        )
+        managed = {repo.integration_name for repo in repos if repo.integration_name}
+        return len([folder for folder in folders if folder not in managed])
+
 
     async def async_step_repository_action(
         self, user_input: dict[str, Any] | None = None
@@ -640,11 +841,21 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
 
 
 def _repo_label(repo: Repository | None) -> str:
+    """One line per tracked integration: what it is and what is on disk."""
     if not repo:
         return "?"
-    parts = [repo.full_name]
-    if repo.ref_type != REF_TYPE_RELEASE or repo.ref:
-        parts.append(f"({repo.ref_type}{':' + repo.ref if repo.ref else ''})")
-    if repo.installed_version:
-        parts.append(f"@ {repo.installed_version}")
-    return " ".join(parts)
+    installed = repo.installed_version or "not installed"
+    return " · ".join(
+        (
+            repo.full_name,
+            f"custom_components/{repo.integration_name or '?'}",
+            installed,
+            _tracking_label(repo),
+        )
+    )
+
+
+def _tracking_label(repo: Repository) -> str:
+    if repo.ref_type == REF_TYPE_RELEASE:
+        return "latest release"
+    return f"{repo.ref_type}:{repo.ref or 'default branch'}"

@@ -425,6 +425,26 @@ def is_managed(dest_path: Path) -> bool:
     return read_marker(dest_path) is not None
 
 
+def installed_integrations(dest_root: Path) -> list[str]:
+    """Folder names under ``custom_components/``, sorted.
+
+    Used to tell the user which integrations are on disk but not managed here
+    (installed by the Marketplace, HACS or by hand). A missing or unreadable
+    directory is an empty list: this decorates a screen, it never blocks one.
+    """
+    try:
+        entries = list(Path(dest_root).iterdir())
+    except OSError:
+        return []
+    return sorted(
+        entry.name
+        for entry in entries
+        if _is_real_dir(entry)
+        and not entry.name.startswith(".")
+        and entry.name != "__pycache__"
+    )
+
+
 def installed_owner(dest_path: Path) -> str | None:
     """Return the repository recorded as owner of an integration folder.
 

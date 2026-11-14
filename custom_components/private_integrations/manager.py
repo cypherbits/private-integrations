@@ -141,7 +141,7 @@ class PrivateIntegrationsManager:
         try:
             info = await self.client.get_repo(full_name)
         except GitHubRateLimitError as err:
-            raise HomeAssistantError(self._rate_limit_message(err)) from err
+            raise HomeAssistantError(self.rate_limit_message(err)) from err
         except GitHubError as err:
             raise HomeAssistantError(
                 f"Cannot read {full_name} from GitHub: {err}"
@@ -161,7 +161,7 @@ class PrivateIntegrationsManager:
         try:
             sha = await self.client.get_commit_sha(full_name, ref)
         except GitHubRateLimitError as err:
-            raise HomeAssistantError(self._rate_limit_message(err)) from err
+            raise HomeAssistantError(self.rate_limit_message(err)) from err
         except GitHubError as err:
             raise HomeAssistantError(
                 f"Cannot read {full_name} from GitHub: {err}"
@@ -205,7 +205,7 @@ class PrivateIntegrationsManager:
                 "'Repository access' list."
             ) from err
         except GitHubRateLimitError as err:
-            raise HomeAssistantError(self._rate_limit_message(err)) from err
+            raise HomeAssistantError(self.rate_limit_message(err)) from err
         except GitHubError as err:
             raise HomeAssistantError(
                 f"Cannot access {full_name} on GitHub: {err}"
@@ -380,7 +380,7 @@ class PrivateIntegrationsManager:
         try:
             sha, version = await self._resolve_version(repo)
         except GitHubRateLimitError as err:
-            raise HomeAssistantError(self._rate_limit_message(err)) from err
+            raise HomeAssistantError(self.rate_limit_message(err)) from err
         except HomeAssistantError:
             raise
         except GitHubError as err:
@@ -402,7 +402,7 @@ class PrivateIntegrationsManager:
         try:
             tarball = await self.client.download_tarball(full_name, sha)
         except GitHubRateLimitError as err:
-            raise HomeAssistantError(self._rate_limit_message(err)) from err
+            raise HomeAssistantError(self.rate_limit_message(err)) from err
         except GitHubError as err:
             raise HomeAssistantError(f"Download failed: {err}") from err
 
@@ -643,7 +643,7 @@ class PrivateIntegrationsManager:
         return sha, version
 
     @staticmethod
-    def _rate_limit_message(err: GitHubRateLimitError) -> str:
+    def rate_limit_message(err: GitHubRateLimitError) -> str:
         if err.retry_after is not None:
             return (
                 "GitHub rate limit reached, retry in "

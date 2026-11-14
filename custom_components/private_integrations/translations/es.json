@@ -35,8 +35,9 @@
         "title": "Private Integrations",
         "description": "¿Qué quieres hacer?",
         "menu_options": {
-          "add_repository": "Añadir un repositorio",
-          "manage_repository": "Gestionar / instalar / actualizar un repositorio seguido",
+          "manage_repository": "Mis integraciones — listar, instalar, actualizar o quitar",
+          "add_repository": "Añadir un repositorio por URL",
+          "discover": "Buscar integraciones en mis repositorios de GitHub",
           "update_token": "Actualizar el token de GitHub"
         }
       },
@@ -51,11 +52,31 @@
           "install_now": "Instalar inmediatamente después de añadirlo"
         }
       },
-      "manage_repository": {
-        "title": "Elige un repositorio seguido",
-        "description": "Elige sobre qué repositorio actuar.",
+      "discover": {
+        "title": "Buscar integraciones",
+        "description": "Se revisa cada repositorio que tu token puede leer buscando una carpeta `custom_components/<nombre>/manifest.json`. Se revisaron **{inspected}** repositorios (hasta {limit}, los actualizados más recientemente primero).\n\nLos repositorios que ya sigues no se vuelven a ofrecer. Un token fine-grained solo ve los repositorios a los que se le dio acceso; uno clásico ve todo lo que ve la cuenta.\n\nEnvía para volver al menú."
+      },
+      "proposals": {
+        "title": "Integraciones encontradas",
+        "description": "**{count}** integración(es) encontradas en repositorios que aún no sigues. Elige una: no se descarga nada hasta que confirmes en la pantalla siguiente.",
         "data": {
-          "full_name": "Repositorio"
+          "full_name": "Integración"
+        }
+      },
+      "proposal": {
+        "title": "{repo}",
+        "description": "**{repo}** ofrece `custom_components/{integration}` (versión `{version}`).\n\n¿Cómo quieres seguirla? **Release** necesita que el repositorio tenga una release publicada. **Rama** sigue la rama por defecto del repositorio (`{branch}`) si dejas la referencia vacía.\n\nCon **Instalar inmediatamente** marcado los archivos se escriben en `custom_components/` al momento, y hace falta reiniciar para cargarlos.",
+        "data": {
+          "ref_type": "Seguir por",
+          "ref": "Tag / rama / commit (vacío para la rama por defecto)",
+          "install_now": "Instalar inmediatamente después de añadir"
+        }
+      },
+      "manage_repository": {
+        "title": "Mis integraciones",
+        "description": "**{count}** integración(es) gestionadas aquí. **{other}** carpeta(s) de `custom_components/` no las gestiona Private Integrations.\n\nElige una para instalarla, actualizarla, cambiar cómo se sigue o quitarla.",
+        "data": {
+          "full_name": "Integración"
         }
       },
       "repository_action": {
@@ -113,10 +134,13 @@
       "invalid_auth": "GitHub rechazó el token.",
       "cannot_connect": "No se pudo contactar con GitHub.",
       "add_failed": "No se pudo añadir el repositorio: {detail}",
-      "action_failed": "La acción falló: {detail}"
+      "action_failed": "La acción falló: {detail}",
+      "rate_limited": "Se alcanzó el límite de peticiones de GitHub: {detail}",
+      "no_candidates": "No se encontró ninguna integración en los repositorios que tu token puede leer. Puede que ya las sigas todas, o que ninguna tenga una carpeta `custom_components/<nombre>/manifest.json`."
     },
     "abort": {
-      "no_repositories": "Todavía no se sigue ningún repositorio. Añade uno primero."
+      "no_repositories": "Todavía no se sigue ningún repositorio. Añade uno primero.",
+      "no_candidates": "Esa integración ya no está disponible. Vuelve a hacer la búsqueda."
     }
   },
   "selector": {

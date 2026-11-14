@@ -1047,3 +1047,200 @@ async def test_a_bad_token_can_be_corrected_in_the_same_flow(hass, aioclient_moc
 
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["title"] == "Private Integrations (cypherbits)"
+
+
+# --- Discovering integrations in the account -------------------------------
+
+
+def _candidate(**overrides):
+    from custom_components.private_integrations.catalog import Candidate
+
+    values = {
+        "full_name": "owner/foo",
+        "integration_name": "foo",
+        "version": "1.0.0",
+        "default_branch": "main",
+    }
+    values.update(overrides)
+    return Candidate(**values)
+
+
+def _fake_detection(monkeypatch, result):
+    """Replace the lookup: these tests are about the flow, not about GitHub."""
+    from custom_components.private_integrations import config_flow
+
+    calls = {}
+
+    async def fake(client, *, tracked=(), installed=(), max_repositories=60):
+        calls["tracked"] = set(tracked)
+        calls["installed"] = set(installed)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(config_flow, "async_detect_integrations", fake)
+    return calls
+
+
+async def _open_discover(hass, entry):
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "discover"}
+    )
+
+
+async def test_discovery_offers_what_it_found(hass, entry, monkeypatch):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(monkeypatch, Discovery([_candidate()], inspected=3))
+
+    result = await _open_discover(hass, entry)
+
+    assert result["step_id"] == "proposals"
+    assert result["description_placeholders"]["count"] == "1"
+
+
+async def test_a_discovered_integration_can_be_added_and_installed(
+    hass, entry, aioclient_mock, monkeypatch
+):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(monkeypatch, Discovery([_candidate()], inspected=1))
+    aioclient_mock.get(REPO_URL, json={"default_branch": "main"})
+    aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
+    aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+
+    result = await _open_discover(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FULL_NAME: "owner/foo::foo"}
+    )
+
+    assert result["step_id"] == "proposal"
+    assert result["description_placeholders"]["repo"] == "owner/foo"
+    assert result["description_placeholders"]["integration"] == "foo"
+    assert result["description_placeholders"]["version"] == "1.0.0"
+    assert result["description_placeholders"]["branch"] == "main"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_REF_TYPE: "branch", CONF_REF: "", "install_now": True},
+    )
+
+    assert result["step_id"] == "installed_confirmation"
+    assert store.get("owner/foo").integration_name == "foo"
+    assert store.get("owner/foo").installed_sha == SHA
+
+
+async def test_discovery_does_not_offer_tracked_repositories(
+    hass, entry, monkeypatch
+):
+    from custom_components.private_integrations.catalog import Discovery
+
+    calls = _fake_detection(monkeypatch, Discovery([_candidate()], inspected=1))
+    hass.data[DOMAIN][entry.entry_id]["store"].upsert(
+        Repository(full_name="other/tracked", ref="main")
+    )
+
+    await _open_discover(hass, entry)
+
+    assert "other/tracked" in calls["tracked"]
+
+
+async def test_discovery_without_results_explains_it(hass, entry, monkeypatch):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(monkeypatch, Discovery([], inspected=4))
+
+    result = await _open_discover(hass, entry)
+
+    assert result["step_id"] == "discover"
+    assert result["errors"] == {"base": "no_candidates"}
+    assert result["description_placeholders"]["inspected"] == "4"
+
+
+async def test_discovery_rate_limit_is_explained(hass, entry, monkeypatch):
+    from custom_components.private_integrations.github import GitHubRateLimitError
+
+    _fake_detection(monkeypatch, GitHubRateLimitError("slow down", 30))
+
+    result = await _open_discover(hass, entry)
+
+    assert result["errors"] == {"base": "rate_limited"}
+    assert "30 seconds" in result["description_placeholders"]["detail"]
+
+
+async def test_discovery_auth_error_is_explained(hass, entry, monkeypatch):
+    from custom_components.private_integrations.github import GitHubAuthError
+
+    _fake_detection(monkeypatch, GitHubAuthError("nope"))
+
+    result = await _open_discover(hass, entry)
+
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_discovery_network_error_is_explained(hass, entry, monkeypatch):
+    from custom_components.private_integrations.github import GitHubError
+
+    _fake_detection(monkeypatch, GitHubError("down"))
+
+    result = await _open_discover(hass, entry)
+
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_the_discovery_screen_goes_back_to_the_menu(hass, entry, monkeypatch):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(monkeypatch, Discovery([], inspected=0))
+
+    result = await _open_discover(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {}
+    )
+
+    assert result["step_id"] == "init"
+
+
+async def test_a_candidate_that_cannot_be_added_is_reported(
+    hass, entry, aioclient_mock, monkeypatch
+):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(monkeypatch, Discovery([_candidate()], inspected=1))
+    aioclient_mock.get(REPO_URL, status=404)
+
+    result = await _open_discover(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FULL_NAME: "owner/foo::foo"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_REF_TYPE: "release", CONF_REF: "", "install_now": False},
+    )
+
+    assert result["errors"] == {"base": "add_failed"}
+    assert "owner/foo" in result["description_placeholders"]["detail"]
+
+
+async def test_the_list_says_how_many_integrations_it_does_not_manage(
+    hass, entry
+):
+    from pathlib import Path
+
+    hass.data[DOMAIN][entry.entry_id]["store"].upsert(
+        Repository(full_name="owner/foo", ref="main", integration_name="foo")
+    )
+    components = Path(hass.config.path("custom_components"))
+    for name in ("foo", "hacs", "other"):
+        (components / name).mkdir(parents=True)
+        (components / name / "manifest.json").write_text("{}")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "manage_repository"}
+    )
+
+    assert result["description_placeholders"]["count"] == "1"
+    assert result["description_placeholders"]["other"] == "2"

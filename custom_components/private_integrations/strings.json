@@ -35,8 +35,9 @@
         "title": "Private Integrations",
         "description": "What would you like to do?",
         "menu_options": {
-          "add_repository": "Add a repository",
-          "manage_repository": "Manage / install / update a tracked repository",
+          "manage_repository": "My integrations — list, install, update or remove",
+          "add_repository": "Add a repository by URL",
+          "discover": "Find integrations in my GitHub repositories",
           "update_token": "Update the GitHub token"
         }
       },
@@ -51,11 +52,31 @@
           "install_now": "Install immediately after adding"
         }
       },
-      "manage_repository": {
-        "title": "Pick a tracked repository",
-        "description": "Choose which repository to act on.",
+      "discover": {
+        "title": "Find integrations",
+        "description": "Every repository your token can read is checked for a `custom_components/<name>/manifest.json` folder. **{inspected}** repositories were checked (up to {limit}, most recently updated first).\n\nRepositories you already track are not offered again. A fine-grained token only sees the repositories it was scoped to; a classic one sees everything the account can read.\n\nSubmit to go back to the menu."
+      },
+      "proposals": {
+        "title": "Integrations found",
+        "description": "**{count}** integration(s) found in repositories you do not track yet. Pick one: nothing is downloaded until you confirm on the next screen.",
         "data": {
-          "full_name": "Repository"
+          "full_name": "Integration"
+        }
+      },
+      "proposal": {
+        "title": "{repo}",
+        "description": "**{repo}** provides `custom_components/{integration}` (version `{version}`).\n\nHow should it be followed? **Release** needs a published release in the repository. **Branch** follows the repository's default branch (`{branch}`) when the ref is left blank.\n\nWith **Install immediately** checked the files are written into `custom_components/` right away, and a restart is needed to load them.",
+        "data": {
+          "ref_type": "Track by",
+          "ref": "Tag / branch / commit (leave blank for the default branch)",
+          "install_now": "Install immediately after adding"
+        }
+      },
+      "manage_repository": {
+        "title": "My integrations",
+        "description": "**{count}** integration(s) tracked here. **{other}** folder(s) in `custom_components/` are not managed by Private Integrations.\n\nPick one to install it, update it, change how it is tracked or remove it.",
+        "data": {
+          "full_name": "Integration"
         }
       },
       "repository_action": {
@@ -113,10 +134,13 @@
       "invalid_auth": "GitHub rejected the token.",
       "cannot_connect": "Could not reach GitHub.",
       "add_failed": "Could not add the repository: {detail}",
-      "action_failed": "Action failed: {detail}"
+      "action_failed": "Action failed: {detail}",
+      "rate_limited": "GitHub rate limit reached: {detail}",
+      "no_candidates": "No integration was found in the repositories your token can read. They may all be tracked already, or none of them has a `custom_components/<name>/manifest.json` folder."
     },
     "abort": {
-      "no_repositories": "No repositories are tracked yet. Add one first."
+      "no_repositories": "No repositories are tracked yet. Add one first.",
+      "no_candidates": "That integration is no longer available. Run the search again."
     }
   },
   "selector": {

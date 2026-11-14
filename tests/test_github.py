@@ -350,3 +350,136 @@ async def test_a_release_list_with_junk_entries_is_filtered(hass, aioclient_mock
     release = await client.get_latest_release("owner/foo")
 
     assert release == {"tag_name": "v1", "prerelease": False, "draft": False}
+
+
+# --- Listing repositories and reading files --------------------------------
+
+LIST_URL = "https://api.github.com/user/repos"
+PAGE_1 = (
+    f"{LIST_URL}?per_page=100&page=1&sort=updated"
+    "&affiliation=owner%2Ccollaborator%2Corganization_member"
+)
+PAGE_2 = (
+    f"{LIST_URL}?per_page=100&page=2&sort=updated"
+    "&affiliation=owner%2Ccollaborator%2Corganization_member"
+)
+CONTENTS_URL = "https://api.github.com/repos/owner/foo/contents/custom_components"
+
+
+async def test_repositories_are_listed_with_the_paging_parameters(
+    hass, aioclient_mock
+):
+    aioclient_mock.get(PAGE_1, json=[{"full_name": "owner/foo"}])
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert await client.async_list_repositories() == [{"full_name": "owner/foo"}]
+
+
+async def test_a_full_page_asks_for_the_next_one(hass, aioclient_mock):
+    first = [{"full_name": f"owner/repo{index}"} for index in range(100)]
+    aioclient_mock.get(PAGE_1, json=first)
+    aioclient_mock.get(PAGE_2, json=[{"full_name": "owner/last"}])
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    repositories = await client.async_list_repositories()
+
+    assert len(repositories) == 101
+    assert repositories[-1] == {"full_name": "owner/last"}
+
+
+async def test_a_non_list_payload_ends_the_listing(hass, aioclient_mock):
+    aioclient_mock.get(PAGE_1, json={"message": "unexpected"})
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert await client.async_list_repositories() == []
+
+
+async def test_a_folder_is_listed(hass, aioclient_mock):
+    aioclient_mock.get(
+        CONTENTS_URL,
+        json=[{"name": "foo", "type": "dir"}, {"name": "README.md", "type": "file"}],
+    )
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    entries = await client.async_list_folder("owner/foo", "custom_components", "main")
+
+    assert [entry["name"] for entry in entries] == ["foo", "README.md"]
+
+
+async def test_a_missing_folder_is_empty(hass, aioclient_mock):
+    aioclient_mock.get(CONTENTS_URL, status=404)
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    entries = await client.async_list_folder("owner/foo", "custom_components", "main")
+
+    assert entries == []
+
+
+async def test_a_folder_answering_garbage_is_empty(hass, aioclient_mock):
+    aioclient_mock.get(CONTENTS_URL, json={"message": "not a list"})
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    entries = await client.async_list_folder("owner/foo", "custom_components", "main")
+
+    assert entries == []
+
+
+async def test_a_file_is_decoded_from_base64(hass, aioclient_mock):
+    import base64
+
+    aioclient_mock.get(
+        f"{CONTENTS_URL}/foo/manifest.json",
+        json={
+            "encoding": "base64",
+            "content": base64.b64encode(b'{"domain": "foo"}').decode() + "\n",
+        },
+    )
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    text = await client.async_get_file_text(
+        "owner/foo", "custom_components/foo/manifest.json", "main"
+    )
+
+    assert text == '{"domain": "foo"}'
+
+
+async def test_a_missing_file_is_none(hass, aioclient_mock):
+    aioclient_mock.get(f"{CONTENTS_URL}/foo/manifest.json", status=404)
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert (
+        await client.async_get_file_text(
+            "owner/foo", "custom_components/foo/manifest.json", "main"
+        )
+        is None
+    )
+
+
+async def test_a_file_without_base64_content_is_none(hass, aioclient_mock):
+    aioclient_mock.get(
+        f"{CONTENTS_URL}/foo/manifest.json",
+        json={"encoding": "none", "content": ""},
+    )
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert (
+        await client.async_get_file_text(
+            "owner/foo", "custom_components/foo/manifest.json", "main"
+        )
+        is None
+    )
+
+
+async def test_a_file_with_broken_base64_is_none(hass, aioclient_mock):
+    aioclient_mock.get(
+        f"{CONTENTS_URL}/foo/manifest.json",
+        json={"encoding": "base64", "content": "%%% not base64 %%%"},
+    )
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert (
+        await client.async_get_file_text(
+            "owner/foo", "custom_components/foo/manifest.json", "main"
+        )
+        is None
+    )

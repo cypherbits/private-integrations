@@ -1,6 +1,7 @@
 """GitHub API client for Private Integrations."""
 from __future__ import annotations
 
+import base64
 import logging
 import time
 from typing import Any
@@ -17,6 +18,11 @@ TARBALL_TIMEOUT = aiohttp.ClientTimeout(total=300, connect=10)
 #: Hard cap so a wrong/unexpected ref cannot exhaust Home Assistant memory.
 MAX_TARBALL_BYTES = 64 * 1024 * 1024
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
+
+#: Repositories read by one discovery run: three pages of a hundred. A token
+#: can see thousands; the caller only offers a short list anyway.
+MAX_LISTED_REPOSITORIES = 300
+LIST_PAGE_SIZE = 100
 
 
 class GitHubError(Exception):
@@ -133,6 +139,77 @@ class GitHubClient:
     async def get_repo(self, full_name: str) -> dict[str, Any]:
         payload = await self._get_json(f"{GITHUB_API_BASE}/repos/{full_name}")
         return _as_dict(payload, f"GET /repos/{full_name}")
+
+    async def async_list_repositories(self) -> list[dict[str, Any]]:
+        """Every repository the token can read, most recently updated first.
+
+        ``/user/repos`` is what both token kinds answer with: a classic PAT gets
+        everything the account sees, a fine-grained one only the repositories it
+        was scoped to. That is exactly the set the caller should offer.
+        """
+        repositories: list[dict[str, Any]] = []
+        for page in range(1, MAX_LISTED_REPOSITORIES // LIST_PAGE_SIZE + 1):
+            payload = await self._get_json(
+                f"{GITHUB_API_BASE}/user/repos",
+                params={
+                    "per_page": LIST_PAGE_SIZE,
+                    "page": page,
+                    "sort": "updated",
+                    "affiliation": "owner,collaborator,organization_member",
+                },
+            )
+            if not isinstance(payload, list):
+                break
+            repositories.extend(
+                repository
+                for repository in payload
+                if isinstance(repository, dict)
+            )
+            if len(payload) < LIST_PAGE_SIZE:
+                break
+        return repositories
+
+    async def async_list_folder(
+        self, full_name: str, path: str, ref: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Entries of a directory, or an empty list when it does not exist."""
+        url = (
+            f"{GITHUB_API_BASE}/repos/{full_name}/contents/"
+            f"{quote(path, safe='/')}"
+        )
+        try:
+            payload = await self._get_json(
+                url, params={"ref": ref} if ref else None
+            )
+        except (GitHubNotFoundError, GitHubUnprocessableError):
+            return []
+        if not isinstance(payload, list):
+            return []
+        return [entry for entry in payload if isinstance(entry, dict)]
+
+    async def async_get_file_text(
+        self, full_name: str, path: str, ref: str | None = None
+    ) -> str | None:
+        """Text of a small file, or None when it is missing or unreadable."""
+        url = (
+            f"{GITHUB_API_BASE}/repos/{full_name}/contents/"
+            f"{quote(path, safe='/')}"
+        )
+        try:
+            payload = await self._get_json(
+                url, params={"ref": ref} if ref else None
+            )
+        except (GitHubNotFoundError, GitHubUnprocessableError):
+            return None
+        if not isinstance(payload, dict) or payload.get("encoding") != "base64":
+            return None
+        content = payload.get("content")
+        if not isinstance(content, str):
+            return None
+        try:
+            return base64.b64decode(content).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None
 
     async def get_latest_release(self, full_name: str) -> dict[str, Any] | None:
         """Return the release to install: latest, else newest published one.

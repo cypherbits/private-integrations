@@ -27,6 +27,10 @@ for access to private ones.
   update**, on your schedule. Designed for repos you control yourself, where you
   already know when there's something new to pull.
 - Path-traversal-safe tarball extraction.
+- **A list of your integrations** — every tracked repository with the folder it
+  installs into, the version on disk and how it is followed — and a search of
+  every repository your token can read, offered as proposals to add with one
+  click. Nothing is downloaded until you confirm.
 
 Themes, dashboards, templates, apps, and the other Marketplace categories are
 out of scope. This is integrations only.
@@ -179,19 +183,46 @@ find custom_components -maxdepth 2 -name '.private*hacs*' -print
 
 ## Adding a repository (UI)
 
-1. **Settings → Devices & services → Private Integrations → Configure**.
-2. Pick **"Add a repository"**.
-3. Paste the repo URL (`https://github.com/owner/repo`) or `owner/repo`.
-4. Choose how to track it. The default is **branch**, leaving the ref empty
+**Settings → Devices & services → Private Integrations → Configure** opens a
+menu: **My integrations** (the list), **Add a repository by URL**, **Find
+integrations in my GitHub repositories** and **Update the GitHub token**.
+
+### Finding integrations in your account
+
+**Find integrations in my GitHub repositories** asks GitHub for every
+repository the token can read, then looks for a
+`custom_components/<name>/manifest.json` folder in each one. What it finds is
+listed as proposals, with the version in the manifest:
+
+- A **fine-grained PAT** only sees the repositories it was scoped to, so the
+  list is exactly that set. A **classic PAT** sees everything the account can
+  read, including organisation repositories the account belongs to.
+- Repositories already tracked are left out; archived ones are skipped.
+- The lookup is capped (about 60 repositories, most recently updated first,
+  plus a limit on the manifests it reads), so it answers in seconds instead of
+  walking an organisation with a thousand repos. Only when you pick a proposal
+  is anything downloaded: the next screen shows the integration, its version
+  and how it will be followed, exactly like the manual form.
+- A folder that is not an integration — no manifest, or a manifest whose
+  `domain` does not match the folder — is not offered. Neither is a repository
+  without `custom_components/<name>/`.
+- If GitHub cannot answer (bad token, rate limit), the screen says which one it
+  was instead of showing an empty list.
+
+### Adding one by hand
+
+1. Pick **"Add a repository by URL"**.
+2. Paste the repo URL (`https://github.com/owner/repo`) or `owner/repo`.
+3. Choose how to track it. The default is **branch**, leaving the ref empty
    to follow the repository's default branch — which fits a personal "I push
    when it's ready, then click update" workflow. You can also pick latest
    **release**, a specific **tag**, or a pinned **commit** SHA. A tag, branch or
    commit that does not exist is rejected while you are still in the form, by
    name, instead of failing on the next install.
-5. Leave **"Install immediately after adding"** checked. The form will both
+4. Leave **"Install immediately after adding"** checked. The form will both
    register the repo and copy its `custom_components/<name>/` folder into
    place.
-6. **Restart Home Assistant** to load the new integration. HA does not
+5. **Restart Home Assistant** to load the new integration. HA does not
    hot-reload custom integration code — this constraint applies to the
    Marketplace too.
 
@@ -202,8 +233,9 @@ repository without `custom_components/<integration>/` — can be corrected under
 
 ## Managing tracked repositories (UI)
 
-**Settings → Devices & services → Private Integrations → Configure → "Manage…"**
-lets you pick a tracked repo and:
+**Settings → Devices & services → Private Integrations → Configure → "My
+integrations"** lists every tracked repository — one row per integration, with
+its folder, the version on disk and how it is followed. Pick one and:
 
 - **Install / update** — re-download the configured ref and replace the
   installed files. The archive is unpacked into a staging folder, validated
@@ -222,6 +254,11 @@ lets you pick a tracked repo and:
 - **Remove from tracking** — stop tracking the repository. Files are deleted
   only if you leave the **Delete installed files** box checked; uncheck it to
   keep the integration running while you move it to another tool.
+
+The screen also says how many folders under `custom_components/` this
+integration does not manage — installed by the Marketplace, HACS, Home
+Assistant itself or by hand. They are listed nowhere else on purpose: they are
+not adoptable, and pretending otherwise would end in refusing to touch them.
 
 Installs never overwrite a `custom_components/<name>/` folder that Private
 Integrations did not create: integrations installed by the Marketplace, HACS,
@@ -317,9 +354,10 @@ release this integration claims to support.
 `pytest` runs coverage and fails below 95 %, so a change that stops exercising a
 branch breaks the build. The suite covers tarball extraction (including path
 traversal, missing manifests and failed upgrades), ref resolution against a
-mocked GitHub API, the config/options flows, the store's handling of a corrupted
-file, and the consistency between `strings.json`, its English and Spanish
-translations, `services.yaml` and the code.
+mocked GitHub API, the discovery of integrations in the account, the
+config/options flows, the store's handling of a corrupted file, and the
+consistency between `strings.json`, its English and Spanish translations,
+`services.yaml` and the code.
 
 CI runs ruff, hassfest and the tests twice: against the stack in
 `requirements_test.txt` (Home Assistant 2026.10 today) and against the oldest
