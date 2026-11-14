@@ -261,7 +261,13 @@ async def check_everything(
         )
         row = selector.config["options"][0]["label"]
         check(INSTALLED in row, "the row names the integration folder", row)
-        check(SHA[:7] in row or INSTALLED in row, "and says what is installed", row)
+        repo_entry = manager.store.get(f"owner/{INSTALLED}")
+        check(
+            bool(repo_entry and repo_entry.installed_version)
+            and repo_entry.installed_version in row,
+            "and says what is installed",
+            row,
+        )
 
         from custom_components.private_integrations.catalog import (
             Candidate,

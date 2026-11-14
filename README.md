@@ -133,7 +133,7 @@ Create a Home Assistant backup before starting.
    Private HACS**: submit it to reuse the stored token. If the token has
    expired, the normal token form appears and you can paste a new one.
 3. Finish the setup and restart Home Assistant when asked.
-4. Open **Configure → Manage / install / update** and check that the
+4. Open **Configure → My integrations** and check that the
    repositories are listed. Run **Install / update** on one of them; if it says
    it is already up to date, the folder was adopted correctly.
 5. Remove the old **Private HACS** config entry and the
@@ -229,7 +229,7 @@ listed as proposals, with the version in the manifest:
 If the install fails, the repository stays tracked and the dialog says why: the
 add itself succeeded, and what usually goes wrong — the wrong folder name, a
 repository without `custom_components/<integration>/` — can be corrected under
-**Configure → Manage** without adding it again.
+**Configure → My integrations** without adding it again.
 
 ## Managing tracked repositories (UI)
 
@@ -257,8 +257,10 @@ its folder, the version on disk and how it is followed. Pick one and:
 
 The screen also says how many folders under `custom_components/` this
 integration does not manage — installed by the Marketplace, HACS, Home
-Assistant itself or by hand. They are listed nowhere else on purpose: they are
-not adoptable, and pretending otherwise would end in refusing to touch them.
+Assistant itself or by hand. The discovery marks a proposal whose folder is
+already on disk as **already installed**: adding it is refused until that
+folder is removed, except when its owner is no longer tracked, the one case a
+new repository can take it over.
 
 Installs never overwrite a `custom_components/<name>/` folder that Private
 Integrations did not create: integrations installed by the Marketplace, HACS,

@@ -54,11 +54,11 @@
       },
       "discover": {
         "title": "Find integrations",
-        "description": "Every repository your token can read is checked for a `custom_components/<name>/manifest.json` folder. **{inspected}** repositories were checked (up to {limit}, most recently updated first).\n\nRepositories you already track are not offered again. A fine-grained token only sees the repositories it was scoped to; a classic one sees everything the account can read.\n\nSubmit to go back to the menu."
+        "description": "Every repository your token can read is checked for a folder under `custom_components/` that has a `manifest.json`. **{inspected}** repositories were checked (up to {limit}, most recently updated first).\n\nRepositories you already track are not offered again. A fine-grained token only sees the repositories it was scoped to; a classic one sees everything the account can read.\n\nSubmit to go back to the menu."
       },
       "proposals": {
         "title": "Integrations found",
-        "description": "**{count}** integration(s) found in repositories you do not track yet. Pick one: nothing is downloaded until you confirm on the next screen.",
+        "description": "**{count}** integration(s) found in repositories you do not track yet. Pick one: nothing is downloaded until you confirm on the next screen.\n\n{note}",
         "data": {
           "full_name": "Integration"
         }
@@ -127,7 +127,7 @@
       },
       "install_failed": {
         "title": "Added, but not installed",
-        "description": "**{repo}** is tracked, but its files were not installed:\n\n{reason}\n\nNothing was written to `custom_components/`. Open **Configure → Manage / install / update a tracked repository** to fix what went wrong and try again."
+        "description": "**{repo}** is tracked, but its files were not installed:\n\n{reason}\n\nNothing was written to `custom_components/`. Open **Configure → My integrations** to fix what went wrong and try again."
       }
     },
     "error": {
@@ -136,7 +136,7 @@
       "add_failed": "Could not add the repository: {detail}",
       "action_failed": "Action failed: {detail}",
       "rate_limited": "GitHub rate limit reached: {detail}",
-      "no_candidates": "No integration was found in the repositories your token can read. They may all be tracked already, or none of them has a `custom_components/<name>/manifest.json` folder.",
+      "no_candidates": "No integration was found in the repositories your token can read. They may all be tracked already, or none of them has a folder under `custom_components/` with a `manifest.json`.",
       "not_readable": "GitHub did not let this token read the contents of any repository. A fine-grained token needs **Repository permissions → Contents: Read-only** on the repositories you want to find, and the repositories must be in its 'Repository access' list.",
       "no_repositories_visible": "GitHub returned no repositories for this token. A fine-grained token only sees the repositories added to its 'Repository access' list; a classic token sees everything the account can read."
     },
@@ -173,7 +173,9 @@
     "latest_release": "latest release",
     "default_branch": "default branch",
     "flag_private": "private",
-    "flag_installed": "already installed"
+    "flag_installed": "already installed",
+    "discovery_truncated": "Only the first {limit} repositories were checked, starting with the most recently updated: some integrations may not be listed.",
+    "discovery_rate_limited": "GitHub's rate limit interrupted the search: this list may be incomplete."
   },
   "services": {
     "add_repository": {

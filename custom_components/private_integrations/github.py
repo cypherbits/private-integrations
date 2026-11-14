@@ -146,8 +146,15 @@ class GitHubClient:
         ``/user/repos`` is what both token kinds answer with: a classic PAT gets
         everything the account sees, a fine-grained one only the repositories it
         was scoped to. That is exactly the set the caller should offer.
+
+        Pages are deduplicated by name: the list is sorted by last update, so a
+        repository updated while page 2 is being fetched moves to page 1 and
+        would otherwise come back twice. A page that adds nothing new also ends
+        the walk, which keeps a proxy that ignores ``page`` from multiplying
+        the same hundred entries.
         """
         repositories: list[dict[str, Any]] = []
+        seen: set[str] = set()
         for page in range(1, MAX_LISTED_REPOSITORIES // LIST_PAGE_SIZE + 1):
             payload = await self._get_json(
                 f"{GITHUB_API_BASE}/user/repos",
@@ -160,12 +167,19 @@ class GitHubClient:
             )
             if not isinstance(payload, list):
                 break
-            repositories.extend(
-                repository
-                for repository in payload
-                if isinstance(repository, dict)
-            )
-            if len(payload) < LIST_PAGE_SIZE:
+            added = 0
+            for repository in payload:
+                if not isinstance(repository, dict):
+                    continue
+                full_name = repository.get("full_name")
+                if isinstance(full_name, str):
+                    key = full_name.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                repositories.append(repository)
+                added += 1
+            if len(payload) < LIST_PAGE_SIZE or not added:
                 break
         return repositories
 

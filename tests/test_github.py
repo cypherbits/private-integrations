@@ -387,6 +387,29 @@ async def test_a_full_page_asks_for_the_next_one(hass, aioclient_mock):
     assert repositories[-1] == {"full_name": "owner/last"}
 
 
+async def test_a_repository_returned_twice_is_listed_once(hass, aioclient_mock):
+    """The list is sorted by update time, so a repository can shift pages."""
+    aioclient_mock.get(
+        PAGE_1,
+        json=[{"full_name": "owner/foo"}, {"full_name": "Owner/Foo"}],
+    )
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert await client.async_list_repositories() == [{"full_name": "owner/foo"}]
+
+
+async def test_a_page_that_only_repeats_entries_ends_the_listing(
+    hass, aioclient_mock
+):
+    """A proxy that ignores ``page`` must not multiply the same hundred."""
+    page = [{"full_name": f"owner/repo{index}"} for index in range(100)]
+    aioclient_mock.get(PAGE_1, json=page)
+    aioclient_mock.get(PAGE_2, json=page)
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert len(await client.async_list_repositories()) == 100
+
+
 async def test_a_non_list_payload_ends_the_listing(hass, aioclient_mock):
     aioclient_mock.get(PAGE_1, json={"message": "unexpected"})
     client = GitHubClient(async_get_clientsession(hass), "token")

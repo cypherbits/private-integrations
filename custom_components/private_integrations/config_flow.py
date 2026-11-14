@@ -33,6 +33,7 @@ from homeassistant.helpers.selector import (
 from .catalog import (
     MAX_REPOSITORIES,
     Candidate,
+    Discovery,
     async_detect_integrations,
 )
 from .const import (
@@ -60,7 +61,11 @@ from .github import (
     GitHubError,
     GitHubRateLimitError,
 )
-from .installer import PROTECTED_INTEGRATIONS, installed_integrations
+from .installer import (
+    PROTECTED_INTEGRATIONS,
+    installed_integrations,
+    installed_owner,
+)
 from .localize import async_translate
 from .manager import get_manager
 from .repository import Repository
@@ -399,6 +404,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             " (list truncated)" if discovery.truncated else "",
         )
         self._candidates = discovery.candidates
+        self._discovery = discovery
         return await self.async_step_proposals()
 
     def _show_discover(
@@ -452,11 +458,37 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 )
             }
         )
+        discovery: Discovery | None = getattr(self, "_discovery", None)
         return self.async_show_form(
             step_id="proposals",
             data_schema=schema,
-            description_placeholders={"count": str(len(candidates))},
+            description_placeholders={
+                "count": str(len(candidates)),
+                "note": await self._async_discovery_note(discovery),
+            },
         )
+
+    async def _async_discovery_note(self, discovery: Discovery | None) -> str:
+        """Say when the list is not the whole account.
+
+        A capped scan and a rate limit still return what was found, which is
+        better than an empty screen, but the user has to know the list may not
+        be complete before concluding an integration is missing.
+        """
+        if discovery is None:
+            return ""
+        notes = []
+        if discovery.truncated:
+            notes.append(
+                await async_translate(
+                    self.hass, "discovery_truncated", limit=str(MAX_REPOSITORIES)
+                )
+            )
+        if discovery.rate_limited:
+            notes.append(
+                await async_translate(self.hass, "discovery_rate_limited")
+            )
+        return "\n\n".join(notes)
 
     async def async_step_proposal(
         self, user_input: dict[str, Any] | None = None
@@ -518,7 +550,9 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """The list: every tracked repository and what is on disk for it."""
         manager = get_manager(self.hass)
-        repos = manager.store.all()
+        repos = sorted(
+            manager.store.all(), key=lambda repo: repo.full_name.lower()
+        )
 
         if not repos:
             return self.async_abort(reason="no_repositories")
@@ -595,18 +629,16 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         return f"{label} · {' · '.join(flags)}" if flags else label
 
     async def _count_unmanaged(self, repos: list[Repository]) -> int:
-        """Integrations on disk that no tracked repository here installed."""
-        folders = await self.hass.async_add_executor_job(
-            installed_integrations,
+        """Integrations on disk that no tracked repository here installed.
+
+        The ownership marker decides, not the folder name: a repository tracked
+        without its files (a failed install, or "Install immediately" unchecked)
+        must not hide a folder another tool installed under the same name.
+        """
+        return await self.hass.async_add_executor_job(
+            _count_unmanaged_folders,
             Path(self.hass.config.path("custom_components")),
-        )
-        managed = {repo.integration_name for repo in repos if repo.integration_name}
-        return len(
-            [
-                folder
-                for folder in folders
-                if folder not in managed and folder not in PROTECTED_INTEGRATIONS
-            ]
+            {repo.full_name.lower() for repo in repos},
         )
 
 
@@ -898,4 +930,13 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         )
 
 
-
+def _count_unmanaged_folders(root: Path, tracked: set[str]) -> int:
+    """Folders on disk whose ownership marker names no tracked repository."""
+    unmanaged = 0
+    for name in installed_integrations(root):
+        if name in PROTECTED_INTEGRATIONS:
+            continue
+        owner = installed_owner(root / name)
+        if owner is None or owner.lower() not in tracked:
+            unmanaged += 1
+    return unmanaged

@@ -54,11 +54,11 @@
       },
       "discover": {
         "title": "Buscar integraciones",
-        "description": "Se revisa cada repositorio que tu token puede leer buscando una carpeta `custom_components/<nombre>/manifest.json`. Se revisaron **{inspected}** repositorios (hasta {limit}, los actualizados más recientemente primero).\n\nLos repositorios que ya sigues no se vuelven a ofrecer. Un token fine-grained solo ve los repositorios a los que se le dio acceso; uno clásico ve todo lo que ve la cuenta.\n\nEnvía para volver al menú."
+        "description": "Se revisa cada repositorio que tu token puede leer buscando una carpeta dentro de `custom_components/` que tenga un `manifest.json`. Se revisaron **{inspected}** repositorios (hasta {limit}, los actualizados más recientemente primero).\n\nLos repositorios que ya sigues no se vuelven a ofrecer. Un token fine-grained solo ve los repositorios a los que se le dio acceso; uno clásico ve todo lo que ve la cuenta.\n\nEnvía para volver al menú."
       },
       "proposals": {
         "title": "Integraciones encontradas",
-        "description": "**{count}** integración(es) encontradas en repositorios que aún no sigues. Elige una: no se descarga nada hasta que confirmes en la pantalla siguiente.",
+        "description": "**{count}** integración(es) encontradas en repositorios que aún no sigues. Elige una: no se descarga nada hasta que confirmes en la pantalla siguiente.\n\n{note}",
         "data": {
           "full_name": "Integración"
         }
@@ -127,7 +127,7 @@
       },
       "install_failed": {
         "title": "Añadido, pero no instalado",
-        "description": "**{repo}** se está siguiendo, pero sus archivos no se han instalado:\n\n{reason}\n\nNo se ha escrito nada en `custom_components/`. Abre **Configurar → Gestionar / instalar / actualizar un repositorio seguido** para corregir el problema e inténtalo de nuevo."
+        "description": "**{repo}** se está siguiendo, pero sus archivos no se han instalado:\n\n{reason}\n\nNo se ha escrito nada en `custom_components/`. Abre **Configurar → Mis integraciones** para corregir el problema e inténtalo de nuevo."
       }
     },
     "error": {
@@ -136,7 +136,7 @@
       "add_failed": "No se pudo añadir el repositorio: {detail}",
       "action_failed": "La acción falló: {detail}",
       "rate_limited": "Se alcanzó el límite de peticiones de GitHub: {detail}",
-      "no_candidates": "No se encontró ninguna integración en los repositorios que tu token puede leer. Puede que ya las sigas todas, o que ninguna tenga una carpeta `custom_components/<nombre>/manifest.json`.",
+      "no_candidates": "No se encontró ninguna integración en los repositorios que tu token puede leer. Puede que ya las sigas todas, o que ninguna tenga una carpeta dentro de `custom_components/` con un `manifest.json`.",
       "not_readable": "GitHub no dejó que este token leyera el contenido de ningún repositorio. Un token fine-grained necesita **Repository permissions → Contents: Read-only** en los repositorios que quieras encontrar, y esos repositorios tienen que estar en su lista de 'Repository access'.",
       "no_repositories_visible": "GitHub no devolvió ningún repositorio para este token. Un token fine-grained solo ve los repositorios añadidos a su lista de 'Repository access'; uno clásico ve todo lo que puede leer la cuenta."
     },
@@ -173,7 +173,9 @@
     "latest_release": "última release",
     "default_branch": "rama por defecto",
     "flag_private": "privada",
-    "flag_installed": "ya instalada"
+    "flag_installed": "ya instalada",
+    "discovery_truncated": "Solo se revisaron los primeros {limit} repositorios, empezando por los actualizados más recientemente: puede que falten integraciones.",
+    "discovery_rate_limited": "El límite de peticiones de GitHub interrumpió la búsqueda: puede que falte alguna integración."
   },
   "services": {
     "add_repository": {

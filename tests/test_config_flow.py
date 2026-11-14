@@ -1111,6 +1111,40 @@ async def test_discovery_offers_what_it_found(hass, entry, monkeypatch):
 
     assert result["step_id"] == "proposals"
     assert result["description_placeholders"]["count"] == "1"
+    assert result["description_placeholders"]["note"] == ""
+
+
+async def test_a_capped_discovery_says_it_may_be_incomplete(
+    hass, entry, monkeypatch
+):
+    """A partial list is useful, but it must not look complete."""
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(
+        monkeypatch,
+        Discovery([_candidate()], inspected=60, truncated=True, rate_limited=True),
+    )
+
+    result = await _open_discover(hass, entry)
+
+    note = result["description_placeholders"]["note"]
+    assert "60" in note
+    assert "incomplete" in note
+
+
+async def test_a_proposal_says_when_the_folder_is_already_on_disk(
+    hass, entry, monkeypatch
+):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(
+        monkeypatch, Discovery([_candidate(installed=True)], inspected=1)
+    )
+
+    result = await _open_discover(hass, entry)
+
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert "already installed" in selector.config["options"][0]["label"]
 
 
 async def test_a_discovered_integration_can_be_added_and_installed(
@@ -1249,6 +1283,10 @@ async def test_the_list_says_how_many_integrations_it_does_not_manage(
     for name in ("foo", "hacs", "other"):
         (components / name).mkdir(parents=True)
         (components / name / "manifest.json").write_text("{}")
+    # "foo" belongs to the tracked repository; the marker is what says so.
+    (components / "foo" / ".private_integrations.json").write_text(
+        '{"full_name": "owner/foo"}'
+    )
     # Not an integration, and not counted as one.
     (components / "scratch").mkdir()
 
@@ -1259,6 +1297,27 @@ async def test_the_list_says_how_many_integrations_it_does_not_manage(
 
     assert result["description_placeholders"]["count"] == "1"
     # "hacs" is protected and "scratch" has no manifest: only "other" is left.
+    assert result["description_placeholders"]["other"] == "1"
+
+
+async def test_a_tracked_folder_without_a_marker_is_still_unmanaged(
+    hass, entry
+):
+    """Tracking a name does not make another tool's folder ours."""
+    from pathlib import Path
+
+    hass.data[DOMAIN][entry.entry_id]["store"].upsert(
+        Repository(full_name="owner/foo", ref="main", integration_name="foo")
+    )
+    components = Path(hass.config.path("custom_components"))
+    (components / "foo").mkdir(parents=True)
+    (components / "foo" / "manifest.json").write_text("{}")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "manage_repository"}
+    )
+
     assert result["description_placeholders"]["other"] == "1"
 
 
