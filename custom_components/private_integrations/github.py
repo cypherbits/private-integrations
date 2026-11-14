@@ -116,6 +116,27 @@ class GitHubClient:
             )
         raise GitHubError(f"GitHub error {resp.status} for {url}")
 
+    async def _raise_for_secondary_limit(
+        self, resp: aiohttp.ClientResponse, url: str
+    ) -> None:
+        """Turn a secondary rate limit (403 without quota headers) into ours.
+
+        GitHub answers abuse detection with 403 and no ``Retry-After`` while
+        ``X-RateLimit-Remaining`` still looks healthy, so the headers alone
+        cannot tell it from a permission error. The message can.
+        """
+        if resp.status != 403 or self._retry_after(resp) is not None:
+            return
+        try:
+            text = await resp.text()
+        except (aiohttp.ClientError, UnicodeDecodeError):
+            return
+        lowered = text.lower()
+        if "rate limit" in lowered or "abuse" in lowered:
+            raise GitHubRateLimitError(
+                f"GitHub rate limit reached for {url}", None
+            )
+
     async def _get_json(
         self, url: str, params: dict[str, Any] | None = None
     ) -> Any:
@@ -123,6 +144,7 @@ class GitHubClient:
             async with self._session.get(
                 url, headers=self._headers, params=params, timeout=REQUEST_TIMEOUT
             ) as resp:
+                await self._raise_for_secondary_limit(resp, url)
                 self._raise_for_status(resp, url)
                 try:
                     return await resp.json()
@@ -286,6 +308,7 @@ class GitHubClient:
                 allow_redirects=True,
                 timeout=TARBALL_TIMEOUT,
             ) as resp:
+                await self._raise_for_secondary_limit(resp, url)
                 self._raise_for_status(resp, url)
                 length = resp.headers.get("Content-Length")
                 if length and length.isdigit() and int(length) > MAX_TARBALL_BYTES:

@@ -1,4 +1,5 @@
 """Config and options flow tests."""
+import asyncio
 import io
 import json
 import tarfile
@@ -167,8 +168,22 @@ async def test_a_private_hacs_entry_without_a_token_asks_for_one(
 
 
 async def test_options_manage_lists_repositories(hass, entry):
+    from pathlib import Path
+
+    folder = Path(hass.config.path("custom_components")) / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text(
+        '{"domain": "foo", "version": "9.9.9"}', encoding="utf-8"
+    )
+    (folder / ".private_integrations.json").write_text(
+        '{"full_name": "owner/foo"}', encoding="utf-8"
+    )
     store = hass.data[DOMAIN][entry.entry_id]["store"]
-    store.upsert(Repository(full_name="owner/foo", ref="main"))
+    store.upsert(
+        Repository(
+            full_name="owner/foo", ref="main", integration_name="foo"
+        )
+    )
     store.get("owner/foo").installed_version = "main"
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -178,6 +193,8 @@ async def test_options_manage_lists_repositories(hass, entry):
         result["flow_id"], {"next_step_id": "manage_repository"}
     )
     assert result["step_id"] == "manage_repository"
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert "9.9.9" in selector.config["options"][0]["label"]
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_FULL_NAME: "owner/foo"}
@@ -856,6 +873,7 @@ async def test_change_ref_aborts_when_the_repository_vanished(hass, entry):
     )
 
     assert result["type"] is data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "repository_missing"
 
 
 async def test_removal_aborts_when_the_repository_vanished(hass, entry):
@@ -875,6 +893,7 @@ async def test_removal_aborts_when_the_repository_vanished(hass, entry):
     )
 
     assert result["type"] is data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "repository_missing"
 
 
 async def test_the_list_is_translated(hass, entry):
@@ -1145,6 +1164,90 @@ async def test_a_proposal_says_when_the_folder_is_already_on_disk(
 
     selector = next(iter(result["data_schema"].schema.values()))
     assert "already installed" in selector.config["options"][0]["label"]
+
+
+async def test_a_proposal_with_a_foreign_folder_is_refused_before_tracking(
+    hass, entry, monkeypatch
+):
+    """The catalogue must not register a repository it cannot install."""
+    from pathlib import Path
+
+    from custom_components.private_integrations.catalog import Discovery
+
+    folder = Path(hass.config.path("custom_components")) / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text('{"domain": "foo"}', encoding="utf-8")
+    _fake_detection(
+        monkeypatch, Discovery([_candidate(installed=True)], inspected=1)
+    )
+
+    result = await _open_discover(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FULL_NAME: "owner/foo::foo"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_REF_TYPE: "branch", CONF_REF: "", "install_now": True},
+    )
+
+    assert result["step_id"] == "proposal"
+    assert result["errors"] == {"base": "add_failed"}
+    assert "already exists" in result["description_placeholders"]["detail"]
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+    assert store.get("owner/foo") is None
+
+
+async def test_add_with_a_foreign_folder_is_refused_before_tracking(hass, entry):
+    from pathlib import Path
+
+    folder = Path(hass.config.path("custom_components")) / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text('{"domain": "foo"}', encoding="utf-8")
+
+    result = await _open_add(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        _add_input(install_now=True, integration_name="foo"),
+    )
+
+    assert result["step_id"] == "add_repository"
+    assert result["errors"] == {"base": "add_failed"}
+    assert "already exists" in result["description_placeholders"]["detail"]
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+    assert store.get("owner/foo") is None
+
+
+async def test_a_discovery_that_takes_too_long_is_reported(
+    hass, entry, monkeypatch
+):
+    from custom_components.private_integrations import config_flow
+
+    async def slow(*args, **kwargs):
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(config_flow, "async_detect_integrations", slow)
+    monkeypatch.setattr(config_flow, "DISCOVERY_TIMEOUT", 0.01)
+
+    result = await _open_discover(hass, entry)
+
+    assert result["step_id"] == "discover"
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_a_capped_manifest_search_says_so(hass, entry, monkeypatch):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(
+        monkeypatch,
+        Discovery(
+            [_candidate()], inspected=1, manifests_truncated=True
+        ),
+    )
+
+    result = await _open_discover(hass, entry)
+
+    note = result["description_placeholders"]["note"]
+    assert "manifests" in note
 
 
 async def test_a_discovered_integration_can_be_added_and_installed(

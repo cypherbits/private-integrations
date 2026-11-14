@@ -28,9 +28,9 @@ for access to private ones.
   already know when there's something new to pull.
 - Path-traversal-safe tarball extraction.
 - **A list of your integrations** — every tracked repository with the folder it
-  installs into, the version on disk and how it is followed — and a search of
-  every repository your token can read, offered as proposals to add with one
-  click. Nothing is downloaded until you confirm.
+  installs into, the version declared by its `manifest.json` and how it is
+  followed, and a search of every repository your token can read, offered as
+  proposals to add with one click. Nothing is installed until you confirm.
 
 Themes, dashboards, templates, apps, and the other Marketplace categories are
 out of scope. This is integrations only.
@@ -151,9 +151,11 @@ Notes:
   already gone, add the new integration with a token; the registry is imported
   if the file still exists.
 - If a tracked folder has no marker at all, the migration adopts it only when
-  its `manifest.json` domain matches the folder. Otherwise the repository is
-  listed without files: set its integration folder name and install it again,
-  or create `.private_integrations.json` by hand.
+  its repository is listed in the old `private_hacs` registry and its
+  `manifest.json` domain matches the folder. A repository added after the
+  migration never claims a folder that another tool installed. If the old
+  registry is gone, set the folder and install it again, or create
+  `.private_integrations.json` by hand.
 - The old `private_hacs` and the new `private_integrations` can be loaded at the
   same time during the transition, but do not manage the same folders with both.
   Remove the old one after checking the import.
@@ -200,8 +202,9 @@ listed as proposals, with the version in the manifest:
 - Repositories already tracked are left out; archived ones are skipped.
 - The lookup is capped (about 60 repositories, most recently updated first,
   plus a limit on the manifests it reads), so it answers in seconds instead of
-  walking an organisation with a thousand repos. Only when you pick a proposal
-  is anything downloaded: the next screen shows the integration, its version
+  walking an organisation with a thousand repos. If either limit cuts the
+  search short, the proposals screen says so. Only when you pick a proposal
+  is anything installed: the next screen shows the integration, its version
   and how it will be followed, exactly like the manual form.
 - A folder that is not an integration — no manifest, or a manifest whose
   `domain` does not match the folder — is not offered. Neither is a repository
@@ -235,7 +238,8 @@ repository without `custom_components/<integration>/` — can be corrected under
 
 **Settings → Devices & services → Private Integrations → Configure → "My
 integrations"** lists every tracked repository — one row per integration, with
-its folder, the version on disk and how it is followed. Pick one and:
+its folder, the version in its `manifest.json` and how it is followed. Pick one
+and:
 
 - **Install / update** — re-download the configured ref and replace the
   installed files. The archive is unpacked into a staging folder, validated
@@ -265,16 +269,19 @@ new repository can take it over.
 Installs never overwrite a `custom_components/<name>/` folder that Private
 Integrations did not create: integrations installed by the Marketplace, HACS,
 Home Assistant itself or by hand are protected, as are the `hacs`,
-`homeassistant`, `marketplace` and `private_integrations` folders. A folder is
+`homeassistant`, `marketplace`, `private_hacs` and `private_integrations`
+folders. A folder is
 tied to the repository that installed it (a marker inside the folder records
-which one), and two tracked repositories cannot share the same one. The single
-exception is a folder whose owner is no longer tracked -- after removing a
-repository with **Delete installed files** unchecked -- which a new repository
-can take over instead of leaving it unusable.
+which one), and two tracked repositories cannot share the same one. During a
+normal install, the only exception is a folder whose owner is no longer tracked
+-- after removing a repository with **Delete installed files** unchecked --
+which a new repository can take over instead of leaving it unusable.
 
-A folder without that marker is always treated as foreign, even when it looks
-like the integration this repository provides: Private Integrations never
-overwrites or deletes it. Delete it manually if you want to take it over.
+A folder without that marker is always treated as foreign during normal use,
+even when it looks like the integration this repository provides: Private
+Integrations never overwrites or deletes it. Delete it manually if you want to
+take it over. The legacy import described above is the only time a marker is
+created for an existing folder.
 
 There is no background polling. Private Integrations only contacts GitHub when you
 explicitly add, install, or update a repo.
@@ -331,7 +338,7 @@ exists because:
   contacts GitHub when you ask it to.
 - It is private-first, with plain Home Assistant services and no separate UI
   panel.
-- It is small enough to read end-to-end (~2,500 lines, docstrings included) and
+- It is small enough to read end-to-end (~3,300 lines, docstrings included) and
   audit before running.
 - Private Integrations also works on Home Assistant 2024.11 through 2026.10,
   before the Marketplace existed. HACS covered part of that range and was

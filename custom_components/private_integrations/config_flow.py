@@ -5,6 +5,7 @@ The options flow ("Configure" button) is the day-to-day UI for managing repos.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .catalog import (
+    MAX_MANIFESTS,
     MAX_REPOSITORIES,
     Candidate,
     Discovery,
@@ -64,6 +66,7 @@ from .github import (
 from .installer import (
     PROTECTED_INTEGRATIONS,
     installed_integrations,
+    installed_manifest_version,
     installed_owner,
 )
 from .localize import async_translate
@@ -81,6 +84,10 @@ TOKEN_PLACEHOLDERS = {
     "classic_url": CLASSIC_PAT_URL,
     "fine_url": FINE_GRAINED_PAT_URL,
 }
+
+#: A discovery makes up to 140 requests. With a broken connection each one can
+#: take its own timeout, so the whole lookup gets a ceiling.
+DISCOVERY_TIMEOUT = 120
 
 
 def _token_schema() -> vol.Schema:
@@ -303,6 +310,29 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             return await self.async_step_installed_confirmation()
         return await self.async_step_up_to_date_confirmation()
 
+    async def _async_install_blocker(
+        self,
+        full_name_or_url: str,
+        integration_name: str | None,
+        *,
+        install_now: bool,
+    ) -> str | None:
+        """Why the install would be refused, before the repository is tracked.
+
+        Only usable when the folder is known in advance (a discovered proposal,
+        or the manual form with a folder name). A blank folder is resolved from
+        the archive, which is only known after the download.
+        """
+        if not install_now or not integration_name:
+            return None
+        manager = get_manager(self.hass)
+        try:
+            full_name = manager.parse_repo_input(full_name_or_url)
+        except HomeAssistantError:
+            # Let add_repository report the malformed reference.
+            return None
+        return await manager.install_blocker(full_name, integration_name)
+
     async def async_step_add_repository(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -310,16 +340,27 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         self._error_detail = ""
 
         if user_input is not None:
-            result = await self._add_and_install(
-                full_name=user_input[CONF_FULL_NAME],
-                ref_type=user_input[CONF_REF_TYPE],
-                ref=user_input.get(CONF_REF) or None,
-                integration_name=user_input.get(CONF_INTEGRATION_NAME) or None,
-                install_now=user_input.get(CONF_INSTALL_NOW, True),
+            install_now = user_input.get(CONF_INSTALL_NOW, True)
+            integration_name = user_input.get(CONF_INTEGRATION_NAME) or None
+            blocker = await self._async_install_blocker(
+                user_input[CONF_FULL_NAME],
+                integration_name,
+                install_now=install_now,
             )
-            if result is not None:
-                return result
-            errors["base"] = "add_failed"
+            if blocker is not None:
+                self._error_detail = blocker
+                errors["base"] = "add_failed"
+            else:
+                result = await self._add_and_install(
+                    full_name=user_input[CONF_FULL_NAME],
+                    ref_type=user_input[CONF_REF_TYPE],
+                    ref=user_input.get(CONF_REF) or None,
+                    integration_name=integration_name,
+                    install_now=install_now,
+                )
+                if result is not None:
+                    return result
+                errors["base"] = "add_failed"
 
         schema = vol.Schema(
             {
@@ -370,11 +411,14 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             Path(self.hass.config.path("custom_components")),
         )
         try:
-            discovery = await async_detect_integrations(
-                manager.client,
-                tracked={repo.full_name for repo in manager.store.all()},
-                installed=installed,
-            )
+            async with asyncio.timeout(DISCOVERY_TIMEOUT):
+                discovery = await async_detect_integrations(
+                    manager.client,
+                    tracked={repo.full_name for repo in manager.store.all()},
+                    installed=installed,
+                )
+        except TimeoutError:
+            return self._show_discover("cannot_connect", "")
         except GitHubRateLimitError as err:
             return self._show_discover(
                 "rate_limited", manager.rate_limit_message(err)
@@ -484,6 +528,14 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                     self.hass, "discovery_truncated", limit=str(MAX_REPOSITORIES)
                 )
             )
+        if discovery.manifests_truncated:
+            notes.append(
+                await async_translate(
+                    self.hass,
+                    "discovery_manifests_truncated",
+                    limit=str(MAX_MANIFESTS),
+                )
+            )
         if discovery.rate_limited:
             notes.append(
                 await async_translate(self.hass, "discovery_rate_limited")
@@ -504,16 +556,26 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             return self.async_abort(reason="no_candidates")
 
         if user_input is not None:
-            result = await self._add_and_install(
-                full_name=candidate.full_name,
-                ref_type=user_input[CONF_REF_TYPE],
-                ref=user_input.get(CONF_REF) or None,
-                integration_name=candidate.integration_name,
-                install_now=user_input.get(CONF_INSTALL_NOW, True),
+            install_now = user_input.get(CONF_INSTALL_NOW, True)
+            blocker = await self._async_install_blocker(
+                candidate.full_name,
+                candidate.integration_name,
+                install_now=install_now,
             )
-            if result is not None:
-                return result
-            errors["base"] = "add_failed"
+            if blocker is not None:
+                self._error_detail = blocker
+                errors["base"] = "add_failed"
+            else:
+                result = await self._add_and_install(
+                    full_name=candidate.full_name,
+                    ref_type=user_input[CONF_REF_TYPE],
+                    ref=user_input.get(CONF_REF) or None,
+                    integration_name=candidate.integration_name,
+                    install_now=install_now,
+                )
+                if result is not None:
+                    return result
+                errors["base"] = "add_failed"
 
         schema = vol.Schema(
             {
@@ -597,9 +659,11 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         translated. The repository and folder names are not translated, they
         are identifiers.
         """
-        version = repo.installed_version or await async_translate(
-            self.hass, "not_installed"
-        )
+        version = await self._async_installed_version(repo)
+        if version is None:
+            version = repo.installed_version or await async_translate(
+                self.hass, "not_installed"
+            )
         if repo.ref_type == REF_TYPE_RELEASE:
             tracking = await async_translate(self.hass, "latest_release")
         else:
@@ -608,10 +672,35 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         return " · ".join(
             (
                 repo.full_name,
-                f"custom_components/{repo.integration_name or '?'}",
+                await self._async_folder_label(repo),
                 version,
                 tracking,
             )
+        )
+
+    async def _async_folder_label(self, repo: Repository) -> str:
+        """The folder path to display, or a translated placeholder."""
+        if repo.integration_name:
+            return f"custom_components/{repo.integration_name}"
+        return await async_translate(self.hass, "folder_not_chosen")
+
+    async def _async_installed_version(self, repo: Repository) -> str | None:
+        """Version in the installed manifest, or None when it cannot be read.
+
+        The ownership marker decides: a tracked repository without files must
+        not display the version of a folder another tool put under the same
+        name.
+        """
+        if not repo.integration_name:
+            return None
+        root = Path(self.hass.config.path("custom_components"))
+        owner = await self.hass.async_add_executor_job(
+            installed_owner, root / repo.integration_name
+        )
+        if owner is None or owner.lower() != repo.full_name.lower():
+            return None
+        return await self.hass.async_add_executor_job(
+            installed_manifest_version, root, repo.integration_name
         )
 
     async def _async_candidate_label(self, candidate: Candidate) -> str:
@@ -641,7 +730,6 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             {repo.full_name.lower() for repo in repos},
         )
 
-
     async def async_step_repository_action(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -649,6 +737,8 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         self._error_detail = ""
         manager = get_manager(self.hass)
         full_name: str = self._selected_full_name
+        if manager.store.get(full_name) is None:
+            return self.async_abort(reason="repository_missing")
 
         if user_input is not None:
             self._notice = ""
@@ -712,7 +802,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         full_name: str = self._selected_full_name
         repo = manager.store.get(full_name)
         if repo is None:
-            return self.async_abort(reason="no_repositories")
+            return self.async_abort(reason="repository_missing")
 
         if user_input is not None:
             try:
@@ -780,7 +870,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         full_name: str = self._selected_full_name
         repo = manager.store.get(full_name)
         if repo is None:
-            return self.async_abort(reason="no_repositories")
+            return self.async_abort(reason="repository_missing")
 
         if user_input is not None:
             delete_files = user_input.get(CONF_DELETE_FILES, True)
@@ -803,7 +893,8 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             errors=errors,
             description_placeholders={
                 "repo": await self._async_repo_label(repo),
-                "integration": repo.integration_name or "?",
+                "integration": repo.integration_name
+                or await async_translate(self.hass, "folder_not_chosen"),
                 "detail": self._error_detail,
             },
         )
@@ -818,16 +909,18 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
 
         full_name: str = getattr(self, "_installed_repo_name", "")
         repo = get_manager(self.hass).store.get(full_name) if full_name else None
+        version = await self._async_installed_version(repo) if repo else None
+        if version is None and repo is not None:
+            version = repo.installed_version or (
+                repo.installed_sha[:7] if repo.installed_sha else None
+            )
         return self.async_show_form(
             step_id="installed_confirmation",
             data_schema=vol.Schema({}),
             description_placeholders={
                 "repo": full_name or "?",
                 "integration": (repo.integration_name if repo else "?") or "?",
-                "version": (
-                    repo.installed_version
-                    or (repo.installed_sha[:7] if repo and repo.installed_sha else "?")
-                ) if repo else "?",
+                "version": version or "?",
             },
             last_step=True,
         )

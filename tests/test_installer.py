@@ -11,7 +11,8 @@ from custom_components.private_integrations.installer import (
     STAGING_PREFIX,
     InstallerError,
     install_from_tarball,
-    is_managed,
+    installed_manifest_version,
+    installed_owner,
     list_integrations,
     read_marker,
     recover_stale_installs,
@@ -189,11 +190,11 @@ def test_refuses_to_replace_foreign_folder(dest_root):
 
 def test_ownership_marker(dest_root):
     _, path = install_from_tarball(repo_tarball(), dest_root, None)
-    assert not is_managed(path)
+    assert read_marker(path) is None
 
     write_marker(path, {"full_name": "owner/foo"})
 
-    assert is_managed(path)
+    assert read_marker(path) is not None
     assert read_marker(path)["full_name"] == "owner/foo"
 
 
@@ -665,3 +666,39 @@ def test_installed_integrations_lists_only_real_integrations(tmp_path):
 
     assert installed_integrations(tmp_path) == ["alpha", "beta"]
     assert installed_integrations(tmp_path / "missing") == []
+
+
+def test_installed_manifest_version_reads_the_installed_manifest(tmp_path):
+    folder = tmp_path / "foo"
+    folder.mkdir()
+    (folder / "manifest.json").write_text(
+        '{"domain": "foo", "version": "1.2.3"}', encoding="utf-8"
+    )
+
+    assert installed_manifest_version(tmp_path, "foo") == "1.2.3"
+    assert installed_manifest_version(tmp_path, "missing") is None
+    assert installed_manifest_version(tmp_path, "../foo") is None
+
+
+def test_installed_manifest_version_ignores_broken_manifests(tmp_path):
+    folder = tmp_path / "foo"
+    folder.mkdir()
+    (folder / "manifest.json").write_text("not json", encoding="utf-8")
+
+    assert installed_manifest_version(tmp_path, "foo") is None
+
+
+def test_installed_owner_rejects_a_malformed_marker(tmp_path):
+    folder = tmp_path / "foo"
+    folder.mkdir()
+    for owner in ("   ", "../evil", 42):
+        write_marker(folder, {"full_name": owner})
+        assert installed_owner(folder) is None
+
+    write_marker(folder, {"full_name": "https://github.com/Owner/Repo"})
+    assert installed_owner(folder) == "Owner/Repo"
+
+
+def test_private_hacs_is_protected():
+    with pytest.raises(InstallerError, match="protected"):
+        validate_integration_name("private_hacs")

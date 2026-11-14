@@ -65,7 +65,7 @@
       },
       "proposal": {
         "title": "{repo}",
-        "description": "**{repo}** ofrece `custom_components/{integration}` (versión `{version}`).\n\n¿Cómo quieres seguirla? **Release** necesita que el repositorio tenga una release publicada. **Rama** sigue la rama por defecto del repositorio (`{branch}`) si dejas la referencia vacía.\n\nCon **Instalar inmediatamente** marcado los archivos se escriben en `custom_components/` al momento, y hace falta reiniciar para cargarlos.",
+        "description": "**{repo}** ofrece `custom_components/{integration}` (versión `{version}` en su rama por defecto `{branch}`).\n\n¿Cómo quieres seguirla? **Release** necesita que el repositorio tenga una release publicada. **Rama** sigue la rama por defecto del repositorio si dejas la referencia vacía.\n\nCon **Instalar inmediatamente** marcado los archivos se escriben en `custom_components/` al momento, y hace falta reiniciar para cargarlos.",
         "data": {
           "ref_type": "Seguir por",
           "ref": "Tag / rama / commit (vacío para la rama por defecto)",
@@ -142,6 +142,7 @@
     },
     "abort": {
       "no_repositories": "Todavía no se sigue ningún repositorio. Añade uno primero.",
+      "repository_missing": "Ese repositorio ya no se está siguiendo. Abre Mis integraciones de nuevo.",
       "no_candidates": "Esa integración ya no está disponible. Vuelve a hacer la búsqueda."
     }
   },
@@ -174,7 +175,9 @@
     "default_branch": "rama por defecto",
     "flag_private": "privada",
     "flag_installed": "ya instalada",
+    "folder_not_chosen": "carpeta sin elegir",
     "discovery_truncated": "Solo se revisaron los primeros {limit} repositorios, empezando por los actualizados más recientemente: puede que falten integraciones.",
+    "discovery_manifests_truncated": "La búsqueda se detuvo tras leer {limit} manifests: puede que algunos repositorios no se revisaran del todo.",
     "discovery_rate_limited": "El límite de peticiones de GitHub interrumpió la búsqueda: puede que falte alguna integración."
   },
   "services": {

@@ -11,20 +11,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
 from .github import GitHubClient, GitHubError, GitHubRateLimitError
 from .installer import PROTECTED_INTEGRATIONS
+from .names import is_valid_integration_name
 
 _LOGGER = logging.getLogger(__name__)
 
 CUSTOM_COMPONENTS = "custom_components"
-
-#: Folder names Home Assistant can import (same rule as the installer).
-_VALID_DOMAIN = re.compile(r"^[a-z0-9_]+$")
 
 #: Repositories inspected per run. Each one costs at least one API call, and a
 #: token that belongs to an organisation can see thousands of them: the cap
@@ -62,6 +59,7 @@ class Discovery:
     inspected: int = 0
     listed: int = 0
     truncated: bool = False
+    manifests_truncated: bool = False
     rate_limited: bool = False
     unreadable: int = 0
 
@@ -75,9 +73,11 @@ class _Budget:
 
     def __init__(self, limit: int) -> None:
         self._left = limit
+        self.exhausted = False
 
     def take(self) -> bool:
         if self._left <= 0:
+            self.exhausted = True
             return False
         self._left -= 1
         return True
@@ -143,7 +143,7 @@ async def async_detect_integrations(
                 if entry.get("type") != "dir" or not isinstance(name, str):
                     continue
                 if (
-                    not _VALID_DOMAIN.match(name)
+                    not is_valid_integration_name(name)
                     or name in PROTECTED_INTEGRATIONS
                     or not budget.take()
                 ):
@@ -189,6 +189,7 @@ async def async_detect_integrations(
         inspected=len(inspectable),
         listed=len(repositories),
         truncated=truncated,
+        manifests_truncated=budget.exhausted,
         rate_limited=rate_limited,
         unreadable=unreadable,
     )

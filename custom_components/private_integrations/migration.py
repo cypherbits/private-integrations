@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .const import OLD_DOMAIN, STORAGE_KEY, STORAGE_VERSION
+from .names import is_valid_integration_name
+from .refs import parse_repo_reference
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,9 +29,6 @@ OLD_STORE_KEY = f"{OLD_DOMAIN}.repositories"
 #: Marker written by this integration, and the old one it replaces.
 NEW_MARKER = ".private_integrations.json"
 _OLD_MARKER_GLOB = ".private*hacs*.json"
-
-#: Same rule the installer applies to integration folder names.
-_VALID_INTEGRATION = re.compile(r"^[a-z0-9_]+$")
 
 
 @dataclass(frozen=True)
@@ -49,13 +47,21 @@ def migrate_private_hacs(config_dir: Path) -> MigrationResult:
     old registry, so the caller can load them into the store through Home
     Assistant's public API (the storage cache may not know about the new file
     yet).
+
+    A marker is renamed for any tracked folder that carries the previous name.
+    An unmarked folder is adopted only when its repository is in the old
+    registry: that registry is the only proof that the folder was installed by
+    the previous integration. A repository added afterwards must never claim a
+    folder that another tool installed.
     """
     config_dir = Path(config_dir)
     actions: list[str] = []
     imported: list[dict[str, Any]] = []
     try:
-        repositories, imported = _migrate_store(config_dir, actions)
-        _migrate_markers(config_dir, repositories, actions)
+        repositories, imported, adoptable = _migrate_store(config_dir, actions)
+        _migrate_markers(
+            config_dir, repositories, actions, adoptable=adoptable
+        )
     except OSError as err:
         _LOGGER.warning(
             "Private Integrations: could not import a previous Private HACS "
@@ -91,33 +97,29 @@ def _repositories(envelope: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 def _migrate_store(
     config_dir: Path, actions: list[str]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str]]:
     """Copy the old registry to the new key, unless one already exists.
 
-    Returns the entries used to migrate markers and the entries that were
-    imported (empty when the new registry was already authoritative).
+    Returns the entries used to migrate markers, the entries that were imported
+    (empty when the new registry was already authoritative) and the repository
+    names from the old registry, the only ones allowed to adopt an unmarked
+    folder.
     """
     storage = config_dir / ".storage"
     old_path = storage / OLD_STORE_KEY
     new_path = storage / STORAGE_KEY
 
-    new_envelope = _read_object(new_path) if new_path.is_file() else None
-    new_repositories = _repositories(new_envelope)
-    if new_repositories:
-        # The new registry is authoritative; do not merge two sets of entries.
-        return new_repositories, []
-    if new_path.exists() and new_envelope is None:
-        # A malformed registry is the user's to fix; never overwrite it.
-        return new_repositories, []
-    if not old_path.is_file():
-        return new_repositories, []
+    old_repositories = _old_repositories(old_path)
+    adoptable = _repository_names(old_repositories)
 
-    old_envelope = _read_object(old_path)
-    if old_envelope is None:
-        return new_repositories, []
-    old_repositories = _repositories(old_envelope)
+    new_envelope = _read_object(new_path) if new_path.is_file() else None
+    if new_path.exists():
+        # The new registry is authoritative even when it is empty: its absence
+        # is what marks the import as pending. Re-importing an empty registry
+        # would resurrect repositories the user removed.
+        return _repositories(new_envelope), [], adoptable
     if not old_repositories:
-        return new_repositories, []
+        return [], [], adoptable
 
     envelope = {
         "version": STORAGE_VERSION,
@@ -130,23 +132,40 @@ def _migrate_store(
     actions.append(
         f"imported {len(old_repositories)} repositories from {OLD_STORE_KEY}"
     )
-    return old_repositories, old_repositories
+    return old_repositories, old_repositories, adoptable
+
+
+def _old_repositories(path: Path) -> list[dict[str, Any]]:
+    """Return the old registry's entries, or an empty list when it is absent."""
+    if not path.is_file():
+        return []
+    return _repositories(_read_object(path))
+
+
+def _repository_names(repositories: list[dict[str, Any]]) -> set[str]:
+    """Lowercased names of the repositories in the old registry."""
+    names: set[str] = set()
+    for repo in repositories:
+        full_name = repo.get("full_name")
+        if isinstance(full_name, str) and full_name:
+            names.add(full_name.lower())
+    return names
 
 
 def _migrate_markers(
     config_dir: Path,
     repositories: list[dict[str, Any]],
     actions: list[str],
+    *,
+    adoptable: set[str],
 ) -> None:
-    """Rename (or create) the ownership marker of every tracked folder."""
+    """Rename markers, and adopt unmarked folders only from the old registry."""
     root = (config_dir / "custom_components").resolve()
     for repo in repositories:
         integration_name = repo.get("integration_name")
         full_name = repo.get("full_name")
-        if not isinstance(integration_name, str) or not _VALID_INTEGRATION.match(
-            integration_name
-        ):
-            _LOGGER.warning(
+        if not is_valid_integration_name(integration_name):
+            _LOGGER.debug(
                 "Private Integrations: cannot locate the folder of %r; "
                 "set its integration name and install it again",
                 full_name,
@@ -158,12 +177,21 @@ def _migrate_markers(
                 OLD_STORE_KEY,
             )
             continue
+        try:
+            parse_repo_reference(full_name)
+        except ValueError:
+            _LOGGER.warning(
+                "Private Integrations: %r is not 'owner/repo'; not looking "
+                "for its folder",
+                full_name,
+            )
+            continue
 
         folder = (root / integration_name).resolve()
         if not folder.is_relative_to(root) or not folder.is_dir():
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Private Integrations: custom_components/%s was not found; "
-                "%s will be tracked without files",
+                "%s is tracked without files",
                 integration_name,
                 full_name,
             )
@@ -191,8 +219,14 @@ def _migrate_markers(
             )
             continue
 
-        # No marker at all: adopt the folder only when its manifest proves that
-        # it is the integration the old registry says it installed.
+        if full_name.lower() not in adoptable:
+            # A repository added after the migration: an unmarked folder is
+            # not demonstrably ours, so it stays foreign.
+            continue
+
+        # The old registry says this repository installed the folder, but the
+        # old marker is gone. Adopt it only when the manifest proves it is the
+        # same integration.
         manifest = _read_object(folder / "manifest.json")
         if manifest is None or manifest.get("domain") != integration_name:
             _LOGGER.warning(

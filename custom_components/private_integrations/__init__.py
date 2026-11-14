@@ -75,18 +75,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
     client = GitHubClient(session, token)
 
-    try:
-        await client.verify_token()
-    except GitHubAuthError as err:
-        raise ConfigEntryAuthFailed("GitHub token rejected") from err
-    except GitHubRateLimitError as err:
-        # Transient: retry later instead of asking the user for a new token.
-        raise ConfigEntryNotReady(f"GitHub rate limit reached: {err}") from err
-    except GitHubError as err:
-        _LOGGER.warning("GitHub API unavailable at startup: %s", err)
-
-    # Import the previous Private HACS registry and markers before the store is
-    # loaded: the new store is exactly what the migration writes.
+    # Import the previous Private HACS registry and markers before anything
+    # that depends on GitHub. This is local work: a rate limit or an outage
+    # must not delay it, because the user may remove the old config entry (and
+    # with it the old registry) while this setup is waiting to retry.
     config_dir = Path(hass.config.config_dir)
     imported: list[dict[str, Any]] = []
     try:
@@ -110,13 +102,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "repositories"
         )
 
+    # Load and persist the imported registry before touching GitHub. The store
+    # save invalidates Home Assistant's storage cache (the migration wrote the
+    # file behind its back), so a rate limit that aborts this setup leaves a
+    # registry that the next retry can read.
     store = RepositoryStore(hass)
     await store.async_load()
 
     if imported:
-        # Write the imported entries through Home Assistant's store API. The
-        # storage cache may still believe the new file does not exist, and this
-        # also validates the entries exactly as a normal load would.
         for raw in imported:
             try:
                 store.upsert(Repository.from_dict(raw))
@@ -127,6 +120,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     err,
                 )
         await store.async_save()
+
+    try:
+        await client.verify_token()
+    except GitHubAuthError as err:
+        raise ConfigEntryAuthFailed("GitHub token rejected") from err
+    except GitHubRateLimitError as err:
+        # Transient: retry later instead of asking the user for a new token.
+        raise ConfigEntryNotReady(f"GitHub rate limit reached: {err}") from err
+    except GitHubError as err:
+        _LOGGER.warning("GitHub API unavailable at startup: %s", err)
 
     custom_components_dir = Path(hass.config.path("custom_components"))
     if hass.state is CoreState.starting:

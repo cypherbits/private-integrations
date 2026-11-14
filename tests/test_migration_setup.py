@@ -7,6 +7,7 @@ that mock with real storage under the test's temporary config directory.
 import json
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.private_integrations.const import CONF_GITHUB_TOKEN, DOMAIN
@@ -82,3 +83,52 @@ async def test_setup_imports_a_previous_private_hacs_installation(
     assert repo.installed_sha == SHA
     assert (folder / ".private_integrations.json").is_file()
     assert not (folder / ".private_hacs.json").exists()
+
+
+async def test_a_rate_limited_startup_still_imports_the_old_installation(
+    hass, aioclient_mock, isolated_config
+):
+    """The local import must not depend on GitHub being available."""
+    aioclient_mock.get(USER_URL, status=429, headers={"Retry-After": "30"})
+    storage = isolated_config / ".storage"
+    storage.mkdir(parents=True)
+    (storage / "private_hacs.repositories").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "minor_version": 1,
+                "key": "private_hacs.repositories",
+                "data": {
+                    "repositories": [
+                        {
+                            "full_name": "owner/foo",
+                            "ref_type": "branch",
+                            "ref": "main",
+                            "integration_name": "foo",
+                            "installed_version": "main",
+                            "installed_sha": SHA,
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    folder = isolated_config / "custom_components" / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text('{"domain": "foo"}', encoding="utf-8")
+    (folder / ".private_hacs.json").write_text(
+        json.dumps({"full_name": "owner/foo"}), encoding="utf-8"
+    )
+
+    entry = _entry(hass)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert (folder / ".private_integrations.json").is_file()
+    new_store = storage / "private_integrations.repositories"
+    assert new_store.is_file()
+    assert json.loads(new_store.read_text(encoding="utf-8"))["data"][
+        "repositories"
+    ][0]["full_name"] == "owner/foo"

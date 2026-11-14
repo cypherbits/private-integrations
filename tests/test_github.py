@@ -506,3 +506,31 @@ async def test_a_file_with_broken_base64_is_none(hass, aioclient_mock):
         )
         is None
     )
+
+
+async def test_a_secondary_rate_limit_403_is_a_rate_limit(hass, aioclient_mock):
+    """GitHub sends 403 for abuse detection, with no quota headers."""
+    aioclient_mock.get(
+        USER_URL,
+        status=403,
+        text=(
+            "You have exceeded a secondary rate limit. "
+            "Please wait a few minutes before you try again."
+        ),
+    )
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    with pytest.raises(github.GitHubRateLimitError):
+        await client.verify_token()
+
+
+async def test_a_permission_403_is_still_an_auth_error(hass, aioclient_mock):
+    aioclient_mock.get(
+        USER_URL,
+        status=403,
+        text="Resource not accessible by personal access token",
+    )
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    with pytest.raises(github.GitHubAuthError):
+        await client.verify_token()

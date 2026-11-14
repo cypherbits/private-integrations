@@ -65,7 +65,7 @@
       },
       "proposal": {
         "title": "{repo}",
-        "description": "**{repo}** provides `custom_components/{integration}` (version `{version}`).\n\nHow should it be followed? **Release** needs a published release in the repository. **Branch** follows the repository's default branch (`{branch}`) when the ref is left blank.\n\nWith **Install immediately** checked the files are written into `custom_components/` right away, and a restart is needed to load them.",
+        "description": "**{repo}** provides `custom_components/{integration}` (version `{version}` in its default branch `{branch}`).\n\nHow should it be followed? **Release** needs a published release in the repository. **Branch** follows the repository's default branch when the ref is left blank.\n\nWith **Install immediately** checked the files are written into `custom_components/` right away, and a restart is needed to load them.",
         "data": {
           "ref_type": "Track by",
           "ref": "Tag / branch / commit (leave blank for the default branch)",
@@ -142,6 +142,7 @@
     },
     "abort": {
       "no_repositories": "No repositories are tracked yet. Add one first.",
+      "repository_missing": "That repository is no longer tracked. Open My integrations again.",
       "no_candidates": "That integration is no longer available. Run the search again."
     }
   },
@@ -174,7 +175,9 @@
     "default_branch": "default branch",
     "flag_private": "private",
     "flag_installed": "already installed",
+    "folder_not_chosen": "folder not chosen",
     "discovery_truncated": "Only the first {limit} repositories were checked, starting with the most recently updated: some integrations may not be listed.",
+    "discovery_manifests_truncated": "The search stopped after reading {limit} manifests: some repositories were only partly checked.",
     "discovery_rate_limited": "GitHub's rate limit interrupted the search: this list may be incomplete."
   },
   "services": {

@@ -235,6 +235,7 @@ async def test_manifest_reads_are_capped():
 
     assert len(client.file_calls) == MAX_MANIFESTS
     assert len(discovery.candidates) == MAX_MANIFESTS
+    assert discovery.manifests_truncated is True
 
 
 async def test_no_repositories_is_an_empty_lookup():

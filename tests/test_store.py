@@ -246,3 +246,30 @@ async def test_a_stored_name_that_is_not_owner_slash_repo_is_skipped(
     await store.async_load()
 
     assert store.all() == []
+
+
+def test_a_bad_integration_name_is_rejected():
+    with pytest.raises(ValueError, match="integration_name"):
+        Repository.from_dict(
+            {"full_name": FULL_NAME, "integration_name": "../outside"}
+        )
+
+
+def test_an_integration_name_is_normalised():
+    repo = Repository.from_dict(
+        {"full_name": FULL_NAME, "integration_name": "  foo  "}
+    )
+
+    assert repo.integration_name == "foo"
+
+
+async def test_a_stored_entry_with_a_bad_folder_is_skipped(hass, hass_storage):
+    stored(
+        hass_storage,
+        [{"full_name": FULL_NAME, "integration_name": "../outside"}],
+    )
+    store = RepositoryStore(hass)
+
+    await store.async_load()
+
+    assert store.all() == []

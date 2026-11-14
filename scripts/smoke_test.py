@@ -261,13 +261,8 @@ async def check_everything(
         )
         row = selector.config["options"][0]["label"]
         check(INSTALLED in row, "the row names the integration folder", row)
-        repo_entry = manager.store.get(f"owner/{INSTALLED}")
-        check(
-            bool(repo_entry and repo_entry.installed_version)
-            and repo_entry.installed_version in row,
-            "and says what is installed",
-            row,
-        )
+        check("1.0.0" in row, "and says the installed version", row)
+        check("branch:trunk" in row, "and how it is followed", row)
 
         from custom_components.private_integrations.catalog import (
             Candidate,

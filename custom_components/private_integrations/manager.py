@@ -29,6 +29,7 @@ from .github import (
 from .installer import (
     InstallerError,
     install_from_tarball,
+    installed_manifest_version,
     installed_owner,
     list_integrations,
     remove_integration,
@@ -173,6 +174,22 @@ class PrivateIntegrationsManager:
             )
 
     async def add_repository(
+        self,
+        full_name_or_url: str,
+        ref_type: str = REF_TYPE_BRANCH,
+        ref: str | None = None,
+        integration_name: str | None = None,
+    ) -> Repository:
+        """Track a repository, serialized with installs and removals."""
+        async with self._lock:
+            return await self._add_repository(
+                full_name_or_url,
+                ref_type=ref_type,
+                ref=ref,
+                integration_name=integration_name,
+            )
+
+    async def _add_repository(
         self,
         full_name_or_url: str,
         ref_type: str = REF_TYPE_BRANCH,
@@ -330,6 +347,22 @@ class PrivateIntegrationsManager:
         install that failed because of it -- could otherwise only be fixed by
         removing it and adding it again.
         """
+        async with self._lock:
+            return await self._update_tracking(
+                full_name_or_url,
+                ref_type,
+                ref,
+                integration_name=integration_name,
+            )
+
+    async def _update_tracking(
+        self,
+        full_name_or_url: str,
+        ref_type: str,
+        ref: str | None,
+        *,
+        integration_name: str | None | _Keep = _KEEP,
+    ) -> Repository:
         full_name = self.parse_repo_input(full_name_or_url)
         repo = self.store.get(full_name)
         if not repo:
@@ -456,9 +489,13 @@ class PrivateIntegrationsManager:
             integration_name,
         )
 
-        version_label = repo.installed_version or (
-            repo.installed_sha[:7] if repo.installed_sha else "?"
+        version_label = await self.hass.async_add_executor_job(
+            installed_manifest_version, dest_root, integration_name
         )
+        if version_label is None:
+            version_label = repo.installed_version or (
+                repo.installed_sha[:7] if repo.installed_sha else "?"
+            )
         persistent_notification.async_create(
             self.hass,
             await async_translate(
@@ -496,7 +533,11 @@ class PrivateIntegrationsManager:
         Integrations (or was replaced by another tool), so it is never touched,
         even when the entry records a previous install of this repository.
         """
-        return owner is not None and owner.lower() == repo.full_name.lower()
+        return PrivateIntegrationsManager._owns_folder_name(repo.full_name, owner)
+
+    @staticmethod
+    def _owns_folder_name(full_name: str, owner: str | None) -> bool:
+        return owner is not None and owner.lower() == full_name.lower()
 
     def _select_integration(self, repo: Repository, names: list[str]) -> str:
         """Pick the integration to install, before anything is written to disk."""
@@ -557,26 +598,59 @@ class PrivateIntegrationsManager:
         if not dest_path.exists():
             return True
         owner = await self.hass.async_add_executor_job(installed_owner, dest_path)
-        if self._owns_folder(repo, owner):
-            return True
+        blocker = self._replacement_blocker(repo.full_name, dest_path, owner)
+        if blocker is not None:
+            raise HomeAssistantError(blocker)
+        if owner is not None and not self._owns_folder(repo, owner):
+            # The repository that installed this folder is gone: adopting it is
+            # the only way out that does not need a shell on the host.
+            _LOGGER.warning(
+                "Taking over custom_components/%s from %s, which is no longer "
+                "tracked",
+                dest_path.name,
+                owner,
+            )
+        return True
+
+    async def install_blocker(
+        self, full_name: str, integration_name: str | None
+    ) -> str | None:
+        """Reason installing into the folder would be refused, or None.
+
+        The options flow asks before tracking a repository, so a proposal
+        pointing at a folder another tool installed does not leave a tracked
+        repository behind when the install cannot succeed. An unmarked folder
+        is not adoptable; one whose owner is no longer tracked is.
+        """
+        if not integration_name:
+            return None
+        try:
+            validate_integration_name(integration_name)
+        except InstallerError:
+            # add_repository reports the invalid name with its own message.
+            return None
+        dest_path = self._custom_components_dir / integration_name
+        if not await self.hass.async_add_executor_job(dest_path.exists):
+            return None
+        owner = await self.hass.async_add_executor_job(installed_owner, dest_path)
+        return self._replacement_blocker(full_name, dest_path, owner)
+
+    def _replacement_blocker(
+        self, full_name: str, dest_path: Path, owner: str | None
+    ) -> str | None:
+        """Why this repository cannot replace the folder, or None to go ahead."""
+        if self._owns_folder_name(full_name, owner):
+            return None
         if owner is not None:
             if self.store.get(owner) is None:
-                # The repository that installed this folder is gone: adopting it
-                # is the only way out that does not need a shell on the host.
-                _LOGGER.warning(
-                    "Taking over custom_components/%s from %s, which is no "
-                    "longer tracked",
-                    dest_path.name,
-                    owner,
-                )
-                return True
-            raise HomeAssistantError(
+                return None
+            return (
                 f"custom_components/{dest_path.name} is installed from {owner}, "
-                f"not from {repo.full_name}. Two tracked repositories cannot "
-                "share an integration folder: remove the other one first or "
-                "pick a different integration_name."
+                f"not from {full_name}. Two tracked repositories cannot share "
+                "an integration folder: remove the other one first or pick a "
+                "different integration_name."
             )
-        raise HomeAssistantError(
+        return (
             f"custom_components/{dest_path.name} already exists and was not "
             "installed by Private Integrations; refusing to overwrite it. Remove it "
             "first or pick a different integration_name."

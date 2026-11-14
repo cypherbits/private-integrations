@@ -76,7 +76,7 @@ install:
     force:
       name: Force reinstall
       description: >-
-        Install even when the tracked ref already resolves to the version on
+        Install even when the tracked ref already resolves to the commit on
         disk.
       default: false
       selector:
@@ -97,7 +97,7 @@ update:
     force:
       name: Force reinstall
       description: >-
-        Install even when the tracked ref already resolves to the version on
+        Install even when the tracked ref already resolves to the commit on
         disk.
       default: false
       selector:

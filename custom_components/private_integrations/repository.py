@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from .const import REF_TYPE_RELEASE, VALID_REF_TYPES
+from .names import is_valid_integration_name
 from .refs import parse_repo_reference
 
 #: Fields that hold a plain string (or nothing) in the stored representation.
@@ -42,11 +43,21 @@ class Repository:
         """
         allowed = {f for f in cls.__dataclass_fields__}
         values = {k: v for k, v in data.items() if k in allowed}
+        integration_name = _optional_text(values, "integration_name")
+        if integration_name is not None:
+            integration_name = integration_name.strip() or None
+        if integration_name is not None and not is_valid_integration_name(
+            integration_name
+        ):
+            raise ValueError(
+                "integration_name is not a folder name: "
+                f"{integration_name!r}"
+            )
         return cls(
             full_name=_owner_slash_repo(_required_text(values, "full_name")),
             ref_type=_ref_type(values.get("ref_type", REF_TYPE_RELEASE)),
             ref=_optional_text(values, "ref"),
-            integration_name=_optional_text(values, "integration_name"),
+            integration_name=integration_name,
             installed_version=_optional_text(values, "installed_version"),
             installed_sha=_optional_text(values, "installed_sha"),
         )

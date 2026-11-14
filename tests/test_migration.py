@@ -115,6 +115,68 @@ def test_a_new_registry_is_never_overwritten(tmp_path):
     assert result.repositories == []
 
 
+def test_an_empty_new_registry_is_not_refilled_from_the_old_one(tmp_path):
+    """Removing every repository must stick across restarts."""
+    _old_store(tmp_path, [_repo()])
+    storage = tmp_path / ".storage"
+    storage.mkdir(exist_ok=True)
+    new = _new_store(tmp_path)
+    new.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "minor_version": 1,
+                "key": "private_integrations.repositories",
+                "data": {"repositories": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = migrate_private_hacs(tmp_path)
+
+    assert result.actions == []
+    assert result.repositories == []
+    envelope = json.loads(new.read_text(encoding="utf-8"))
+    assert envelope["data"]["repositories"] == []
+
+
+def test_a_repository_added_after_the_migration_does_not_claim_a_folder(
+    tmp_path,
+):
+    """A new tracked repository must not adopt a folder another tool installed."""
+    storage = tmp_path / ".storage"
+    storage.mkdir()
+    _new_store(tmp_path).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "minor_version": 1,
+                "key": "private_integrations.repositories",
+                "data": {"repositories": [_repo()]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    folder = _folder(tmp_path)
+
+    result = migrate_private_hacs(tmp_path)
+
+    assert result.actions == []
+    assert not (folder / NEW_MARKER).exists()
+
+
+def test_an_old_registry_entry_is_still_adopted(tmp_path):
+    """The legacy fallback remains for folders the old tool installed."""
+    _old_store(tmp_path, [_repo()])
+    folder = _folder(tmp_path)
+
+    result = migrate_private_hacs(tmp_path)
+
+    assert (folder / NEW_MARKER).is_file()
+    assert any("adopted custom_components/foo" in action for action in result.actions)
+
+
 def test_a_malformed_new_registry_is_left_alone(tmp_path):
     _old_store(tmp_path, [_repo()])
     storage = tmp_path / ".storage"

@@ -9,13 +9,15 @@ import io
 import json
 import logging
 import os
-import re
 import shutil
 import tarfile
 import tempfile
 import zlib
 from pathlib import Path
 from typing import Any
+
+from .names import is_valid_integration_name
+from .refs import parse_repo_reference
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,15 +36,15 @@ EXTRACT_CHUNK_SIZE = 64 * 1024
 #: Suffix of the copy kept while the new version is being swapped in.
 BACKUP_SUFFIX = ".private_integrations-backup"
 
-#: Integrations this tool must never overwrite or delete.
+#: Integrations this tool must never overwrite or delete. ``private_hacs`` is
+#: the folder of the previous name: it belongs to the old integration and is
+#: only removed by the user after the import.
 PROTECTED_INTEGRATIONS = frozenset(
-    {"hacs", "homeassistant", "marketplace", "private_integrations"}
+    {"hacs", "homeassistant", "marketplace", "private_hacs", "private_integrations"}
 )
 
-# Home Assistant imports custom_components/<domain> as a Python module and
-# uses the folder name as the integration domain, which is lowercase
-# letters, digits and underscores only.
-_VALID_DOMAIN = re.compile(r"^[a-z0-9_]+$")
+# Home Assistant imports custom_components/<domain> as a Python module and uses
+# the folder name as the integration domain; the rule lives in names.py.
 
 
 class InstallerError(Exception):
@@ -120,7 +122,7 @@ def validate_integration_name(integration_name: str) -> None:
         raise InstallerError(
             f"Refusing to touch the protected integration '{integration_name}'"
         )
-    if not _VALID_DOMAIN.match(integration_name):
+    if not is_valid_integration_name(integration_name):
         raise InstallerError(
             f"Invalid integration folder name: {integration_name!r}; Home "
             "Assistant domains are lowercase letters, digits and underscores"
@@ -387,7 +389,7 @@ def _recover_entry(entry: Path) -> list[str]:
         return []
 
     integration = name[1 : -len(BACKUP_SUFFIX)]
-    if not integration or not _VALID_DOMAIN.match(integration):
+    if not integration or not is_valid_integration_name(integration):
         # Not a backup we could have created; leave it alone.
         return []
     if not _is_real_dir(entry):
@@ -420,11 +422,6 @@ def read_marker(dest_path: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def is_managed(dest_path: Path) -> bool:
-    """True when this integration folder was installed by Private Integrations."""
-    return read_marker(dest_path) is not None
-
-
 def installed_integrations(dest_root: Path) -> list[str]:
     """Integrations present under ``custom_components/``, sorted.
 
@@ -452,13 +449,41 @@ def installed_owner(dest_path: Path) -> str | None:
     """Return the repository recorded as owner of an integration folder.
 
     ``None`` means the folder carries no usable ownership marker, so it cannot
-    be attributed to any tracked repository.
+    be attributed to any tracked repository. The name is parsed as a repository
+    reference: a hand-edited marker with whitespace or a path in ``full_name``
+    must not turn an unrelated folder into ours.
     """
     marker = read_marker(dest_path)
     if marker is None:
         return None
     owner = marker.get("full_name")
-    return owner if isinstance(owner, str) and owner else None
+    if not isinstance(owner, str):
+        return None
+    try:
+        return parse_repo_reference(owner)
+    except ValueError:
+        return None
+
+
+def installed_manifest_version(
+    dest_root: Path, integration_name: str | None
+) -> str | None:
+    """Version recorded by the installed integration's manifest, if any.
+
+    ``installed_version`` in the registry is the ref the repository follows
+    (``main``, a tag, a short SHA), not the version the integration declares.
+    The list and the restart notification want the latter, so they read it from
+    the folder that was actually installed.
+    """
+    if not integration_name or not is_valid_integration_name(integration_name):
+        return None
+    manifest_path = Path(dest_root) / integration_name / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    return version if isinstance(version, str) and version else None
 
 
 def write_marker(dest_path: Path, data: dict[str, Any]) -> None:

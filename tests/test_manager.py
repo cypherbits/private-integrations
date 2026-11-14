@@ -1,4 +1,5 @@
 """Tests for the repository manager (install path)."""
+import asyncio
 import io
 import json
 import tarfile
@@ -8,7 +9,7 @@ from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.private_integrations.const import CONF_GITHUB_TOKEN, DOMAIN
-from custom_components.private_integrations.installer import is_managed, read_marker
+from custom_components.private_integrations.installer import read_marker, write_marker
 from custom_components.private_integrations.repository import Repository
 
 TOKEN = "ghp_test_token"
@@ -97,7 +98,7 @@ async def test_install_writes_files_and_marker(hass, aioclient_mock, manager):
     assert result.changed
     assert (dest / "manifest.json").is_file()
     assert (dest / "__init__.py").read_text() == "# version 1\n"
-    assert is_managed(dest)
+    assert read_marker(dest) is not None
     assert read_marker(dest)["full_name"] == "owner/foo"
     assert repo.installed_sha == SHA
     assert repo.installed_version == "main"
@@ -1143,3 +1144,65 @@ async def test_adding_a_tracked_repository_says_which_folder_it_owns(
     message = str(err.value)
     assert "custom_components/foo" in message
     assert "tracked once" in message
+
+
+async def test_install_blocker_reports_a_foreign_folder(manager):
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    (dest / "manifest.json").write_text('{"domain": "foo"}')
+
+    blocker = await manager.install_blocker("owner/foo", "foo")
+
+    assert blocker is not None
+    assert "already exists" in blocker
+
+
+async def test_install_blocker_allows_an_adoptable_folder(manager):
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    write_marker(dest, {"full_name": "old/repo"})
+
+    assert await manager.install_blocker("owner/foo", "foo") is None
+
+
+async def test_install_blocker_reports_a_folder_of_another_tracked_repo(manager):
+    track(manager, full_name="other/repo", integration_name="foo")
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    write_marker(dest, {"full_name": "other/repo"})
+
+    blocker = await manager.install_blocker("owner/foo", "foo")
+
+    assert blocker is not None
+    assert "installed from other/repo" in blocker
+
+
+async def test_install_blocker_ignores_missing_or_invalid_folders(manager):
+    assert await manager.install_blocker("owner/foo", None) is None
+    assert await manager.install_blocker("owner/foo", "../foo") is None
+    assert await manager.install_blocker("owner/foo", "missing") is None
+
+
+async def test_updating_tracking_cannot_resurrect_a_removed_repository(
+    manager, monkeypatch
+):
+    track(manager, integration_name="foo")
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow(*args, **kwargs):
+        started.set()
+        await release.wait()
+        return "main"
+
+    monkeypatch.setattr(manager, "_resolve_tracking_ref", slow)
+    update = asyncio.create_task(
+        manager.update_tracking("owner/foo", "branch", "main")
+    )
+    await started.wait()
+    remove = asyncio.create_task(manager.remove_repository("owner/foo"))
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(update, remove)
+
+    assert manager.store.get("owner/foo") is None
