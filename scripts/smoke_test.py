@@ -5,8 +5,9 @@ pytest-homeassistant-custom-component pins, which lags behind: 2026.11 was
 released before the harness supported it. This script boots the Home Assistant
 installed in the current interpreter (whatever version that is), with the
 integration copied into its `custom_components/`, and walks the whole surface:
-discovery, config flow, entry setup, services, options flow, install, restart
-notification, removal and unload.
+discovery, config flow, entry setup, services, options flow (the list and the
+search of the account included), install, restart notification, removal and
+unload.
 
     python scripts/smoke_test.py [
         --repo PATH] [--config-dir PATH] [--keep] [--skip-pip]
@@ -90,7 +91,9 @@ def mount_custom_components(config_dir: pathlib.Path) -> None:
     import custom_components  # noqa: F401
 
 
-async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
+async def check_everything(
+    repo: pathlib.Path, config_dir: pathlib.Path, *, skip_pip: bool = False
+) -> int:
     check = Report()
 
     if config_dir.exists():
@@ -106,7 +109,7 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
 
     mount_custom_components(config_dir)
     hass = await bootstrap.async_setup_hass(
-        RuntimeConfig(config_dir=str(config_dir), skip_pip=True)
+        RuntimeConfig(config_dir=str(config_dir), skip_pip=skip_pip)
     )
     if hass is None:
         print("Home Assistant did not start")
@@ -196,8 +199,13 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
         )
         check(
             result["menu_options"]
-            == ["add_repository", "manage_repository", "update_token"],
-            "with the three entries",
+            == [
+                "manage_repository",
+                "add_repository",
+                "discover",
+                "update_token",
+            ],
+            "with the four entries",
             result["menu_options"],
         )
 
@@ -240,7 +248,69 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
             "a restart notification is created",
         )
 
-        print("8. a second install changes nothing")
+        print("8. the list and the discovery")
+        listed = await hass.config_entries.options.async_init(entry.entry_id)
+        listed = await hass.config_entries.options.async_configure(
+            listed["flow_id"], {"next_step_id": "manage_repository"}
+        )
+        check(listed["step_id"] == "manage_repository", "the list opens", listed)
+        selector = next(iter(listed["data_schema"].schema.values()))
+        check(
+            selector.config.get("mode") == "list",
+            "the list is a list, not a dropdown",
+        )
+        row = selector.config["options"][0]["label"]
+        check(INSTALLED in row, "the row names the integration folder", row)
+        check(SHA[:7] in row or INSTALLED in row, "and says what is installed", row)
+
+        from custom_components.private_integrations.catalog import (
+            Candidate,
+            Discovery,
+        )
+
+        with patch(
+            f"custom_components.{INTEGRATION}.config_flow.async_detect_integrations",
+            return_value=Discovery(
+                candidates=[
+                    Candidate(
+                        full_name=f"owner/{INSTALLED}",
+                        integration_name=INSTALLED,
+                        version="1.0.0",
+                        private=True,
+                    )
+                ],
+                inspected=1,
+                listed=1,
+            ),
+        ):
+            found = await hass.config_entries.options.async_init(entry.entry_id)
+            found = await hass.config_entries.options.async_configure(
+                found["flow_id"], {"next_step_id": "discover"}
+            )
+            check(
+                found["step_id"] == "proposals",
+                "the search offers candidates",
+                found,
+            )
+            option = next(iter(found["data_schema"].schema.values())).config[
+                "options"
+            ][0]
+            check(
+                option["value"] == f"owner/{INSTALLED}::{INSTALLED}",
+                "the value is unique",
+                option,
+            )
+            check("private" in option["label"], "the row says it is private", option)
+            chosen = await hass.config_entries.options.async_configure(
+                found["flow_id"], {"full_name": option["value"]}
+            )
+            check(chosen["step_id"] == "proposal", "picking one confirms it", chosen)
+            check(
+                chosen["description_placeholders"]["integration"] == INSTALLED,
+                "the confirmation names the integration",
+            )
+
+        print("9. a second install changes nothing")
         with patch(
             f"custom_components.{INTEGRATION}.GitHubClient.get_commit_sha",
             return_value=SHA,
@@ -249,7 +319,7 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
         check(not second_install.changed, "a repeated install changes nothing")
         check(folder.is_dir(), "the folder is still there")
 
-        print("9. removing it")
+        print("10. removing it")
         await manager.remove_repository(f"owner/{INSTALLED}")
         check(not folder.exists(), "the folder is deleted")
         check(
@@ -260,7 +330,7 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
             "the restart notification is gone",
         )
 
-        print("10. no leftover staging or backup folders")
+        print("11. no leftover staging or backup folders")
         leftovers = [
             path.name
             for path in (config_dir / "custom_components").iterdir()
@@ -268,7 +338,7 @@ async def check_everything(repo: pathlib.Path, config_dir: pathlib.Path) -> int:
         ]
         check(leftovers == [], "custom_components/ is clean", leftovers)
 
-        print("11. unloading is clean")
+        print("12. unloading is clean")
         await hass.config_entries.async_unload(entry.entry_id)
         check(
             not hass.services.has_service(INTEGRATION, "install"),
@@ -304,9 +374,20 @@ def main() -> int:
         action="store_true",
         help="leave the generated config directory in place",
     )
+    parser.add_argument(
+        "--skip-pip",
+        action="store_true",
+        help=(
+            "do not let Home Assistant install the requirements of its own "
+            "integrations; without them it can fall into recovery mode, where "
+            "custom integrations are not loaded at all"
+        ),
+    )
     args = parser.parse_args()
 
-    exit_code = asyncio.run(check_everything(args.repo, args.config_dir))
+    exit_code = asyncio.run(
+        check_everything(args.repo, args.config_dir, skip_pip=args.skip_pip)
+    )
     if not args.keep and args.config_dir.exists():
         shutil.rmtree(args.config_dir, ignore_errors=True)
     return exit_code

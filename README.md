@@ -368,10 +368,16 @@ one that no longer exists.
 There is a third job for the **latest** Home Assistant, which the test harness
 does not reach yet: `scripts/smoke_test.py` boots the Home Assistant installed in
 the interpreter, with this integration in its `custom_components/`, and walks the
-whole surface — config flow, options flow, install, restart notification, removal,
-unload. Run it locally against any version with:
+whole surface — config flow, options flow, the list, the discovery, install,
+restart notification, removal, unload. Run it locally against any version with:
 
 ```bash
 pip install homeassistant          # whatever version you want to check
 python scripts/smoke_test.py
 ```
+
+Home Assistant installs the requirements of its own integrations on start, and
+the script lets it: without them (no frontend, no TurboJPEG) the bootstrap falls
+into recovery mode, where custom integrations are not loaded at all and every
+check fails with `IntegrationNotFound`. `--skip-pip` skips that step when the
+interpreter already has them.

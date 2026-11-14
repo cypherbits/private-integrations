@@ -426,11 +426,14 @@ def is_managed(dest_path: Path) -> bool:
 
 
 def installed_integrations(dest_root: Path) -> list[str]:
-    """Folder names under ``custom_components/``, sorted.
+    """Integrations present under ``custom_components/``, sorted.
 
-    Used to tell the user which integrations are on disk but not managed here
-    (installed by the Marketplace, HACS or by hand). A missing or unreadable
-    directory is an empty list: this decorates a screen, it never blocks one.
+    A folder counts when it carries a ``manifest.json``, which is what Home
+    Assistant needs to load it; ``custom_components/`` also holds the odd
+    ``__pycache__`` or scratch folder, and those are not integrations. Used to
+    tell the user which integrations are on disk but not managed here (installed
+    by the Marketplace, HACS or by hand). A missing or unreadable directory is
+    an empty list: this decorates a screen, it never blocks one.
     """
     try:
         entries = list(Path(dest_root).iterdir())
@@ -441,7 +444,7 @@ def installed_integrations(dest_root: Path) -> list[str]:
         for entry in entries
         if _is_real_dir(entry)
         and not entry.name.startswith(".")
-        and entry.name != "__pycache__"
+        and (entry / "manifest.json").is_file()
     )
 
 

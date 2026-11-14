@@ -647,3 +647,21 @@ def test_a_stray_file_does_not_block_the_install(dest_root):
 
     assert name == "foo"
     assert (path / "manifest.json").is_file()
+
+
+def test_installed_integrations_lists_only_real_integrations(tmp_path):
+    """``custom_components/`` also holds junk; a manifest is what counts."""
+    from custom_components.private_integrations.installer import (
+        installed_integrations,
+    )
+
+    for name in ("alpha", "beta"):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "manifest.json").write_text("{}")
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / ".hidden").mkdir()
+
+    assert installed_integrations(tmp_path) == ["alpha", "beta"]
+    assert installed_integrations(tmp_path / "missing") == []

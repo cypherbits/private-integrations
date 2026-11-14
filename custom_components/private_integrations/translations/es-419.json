@@ -136,7 +136,9 @@
       "add_failed": "No se pudo añadir el repositorio: {detail}",
       "action_failed": "La acción falló: {detail}",
       "rate_limited": "Se alcanzó el límite de peticiones de GitHub: {detail}",
-      "no_candidates": "No se encontró ninguna integración en los repositorios que tu token puede leer. Puede que ya las sigas todas, o que ninguna tenga una carpeta `custom_components/<nombre>/manifest.json`."
+      "no_candidates": "No se encontró ninguna integración en los repositorios que tu token puede leer. Puede que ya las sigas todas, o que ninguna tenga una carpeta `custom_components/<nombre>/manifest.json`.",
+      "not_readable": "GitHub no dejó que este token leyera el contenido de ningún repositorio. Un token fine-grained necesita **Repository permissions → Contents: Read-only** en los repositorios que quieras encontrar, y esos repositorios tienen que estar en su lista de 'Repository access'.",
+      "no_repositories_visible": "GitHub no devolvió ningún repositorio para este token. Un token fine-grained solo ve los repositorios añadidos a su lista de 'Repository access'; uno clásico ve todo lo que puede leer la cuenta."
     },
     "abort": {
       "no_repositories": "Todavía no se sigue ningún repositorio. Añade uno primero.",
@@ -166,7 +168,12 @@
     "files_deleted": "se eliminaron de `custom_components/`",
     "files_kept": "se dejaron en disco",
     "install_notification": "**{repo}** se ha instalado como `custom_components/{integration}/` (versión: `{version}`).\n\n**Reinicia Home Assistant** para cargar la nueva integración. Hasta que reinicies, los archivos están en disco pero aún no están activos.",
-    "install_notification_title": "Private Integrations: {integration} listo"
+    "install_notification_title": "Private Integrations: {integration} listo",
+    "not_installed": "no instalada",
+    "latest_release": "última release",
+    "default_branch": "rama por defecto",
+    "flag_private": "privada",
+    "flag_installed": "ya instalada"
   },
   "services": {
     "add_repository": {

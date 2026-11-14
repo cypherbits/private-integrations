@@ -60,7 +60,7 @@ from .github import (
     GitHubError,
     GitHubRateLimitError,
 )
-from .installer import installed_integrations
+from .installer import PROTECTED_INTEGRATIONS, installed_integrations
 from .localize import async_translate
 from .manager import get_manager
 from .repository import Repository
@@ -381,6 +381,12 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             return self._show_discover("cannot_connect", "")
 
         if not discovery.candidates:
+            if discovery.listed == 0:
+                return self._show_discover("no_repositories_visible", "")
+            if discovery.inspected and discovery.unreadable == discovery.inspected:
+                return self._show_discover(
+                    "not_readable", "", inspected=discovery.inspected
+                )
             return self._show_discover(
                 "no_candidates", "", inspected=discovery.inspected
             )
@@ -427,18 +433,20 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 return self.async_abort(reason="no_candidates")
             return await self.async_step_proposal()
 
+        options = [
+            SelectOptionDict(
+                value=candidate.key,
+                label=await self._async_candidate_label(candidate),
+            )
+            for candidate in candidates
+        ]
         schema = vol.Schema(
             {
                 vol.Required(
                     CONF_FULL_NAME, default=candidates[0].key
                 ): SelectSelector(
                     SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(
-                                value=candidate.key, label=candidate.label
-                            )
-                            for candidate in candidates
-                        ],
+                        options=options,
                         mode=SelectSelectorMode.LIST,
                     )
                 )
@@ -457,7 +465,10 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         self._error_detail = ""
         candidate: Candidate | None = getattr(self, "_selected_candidate", None)
-        if candidate is None:
+        candidates: list[Candidate] = list(getattr(self, "_candidates", []))
+        if candidate is None or candidate not in candidates:
+            # A stale selection from a previous search: the list on screen is
+            # the only thing the user can have picked from.
             return self.async_abort(reason="no_candidates")
 
         if user_input is not None:
@@ -516,17 +527,17 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             self._selected_full_name = user_input[CONF_FULL_NAME]
             return await self.async_step_repository_action()
 
+        options = [
+            SelectOptionDict(
+                value=repo.full_name, label=await self._async_repo_label(repo)
+            )
+            for repo in repos
+        ]
         schema = vol.Schema(
             {
                 vol.Required(CONF_FULL_NAME): SelectSelector(
                     SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(
-                                value=r.full_name,
-                                label=_repo_label(r),
-                            )
-                            for r in repos
-                        ],
+                        options=options,
                         # A list, not a dropdown: this screen is meant to be
                         # read like the Marketplace's installed tab -- one row
                         # per integration, with its version next to it.
@@ -544,6 +555,45 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             },
         )
 
+    async def _async_repo_label(self, repo: Repository) -> str:
+        """One row of the list: what it is, and what is on disk for it.
+
+        Every word a translator can change comes from ``common``: a Spanish UI
+        showing an English row would be the only place the integration is not
+        translated. The repository and folder names are not translated, they
+        are identifiers.
+        """
+        version = repo.installed_version or await async_translate(
+            self.hass, "not_installed"
+        )
+        if repo.ref_type == REF_TYPE_RELEASE:
+            tracking = await async_translate(self.hass, "latest_release")
+        else:
+            ref = repo.ref or await async_translate(self.hass, "default_branch")
+            tracking = f"{repo.ref_type}:{ref}"
+        return " · ".join(
+            (
+                repo.full_name,
+                f"custom_components/{repo.integration_name or '?'}",
+                version,
+                tracking,
+            )
+        )
+
+    async def _async_candidate_label(self, candidate: Candidate) -> str:
+        """One proposal: what it is, and anything worth knowing about it."""
+        flags = []
+        if candidate.private:
+            flags.append(await async_translate(self.hass, "flag_private"))
+        if candidate.installed:
+            flags.append(await async_translate(self.hass, "flag_installed"))
+        label = (
+            f"{candidate.full_name} — "
+            f"custom_components/{candidate.integration_name}"
+            f" ({candidate.version or '?'})"
+        )
+        return f"{label} · {' · '.join(flags)}" if flags else label
+
     async def _count_unmanaged(self, repos: list[Repository]) -> int:
         """Integrations on disk that no tracked repository here installed."""
         folders = await self.hass.async_add_executor_job(
@@ -551,7 +601,13 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             Path(self.hass.config.path("custom_components")),
         )
         managed = {repo.integration_name for repo in repos if repo.integration_name}
-        return len([folder for folder in folders if folder not in managed])
+        return len(
+            [
+                folder
+                for folder in folders
+                if folder not in managed and folder not in PROTECTED_INTEGRATIONS
+            ]
+        )
 
 
     async def async_step_repository_action(
@@ -583,7 +639,9 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 return await self.async_step_up_to_date_confirmation()
 
         repo = manager.store.get(full_name)
-        title_label = _repo_label(repo) if repo else full_name
+        title_label = (
+            await self._async_repo_label(repo) if repo else full_name
+        )
         schema = vol.Schema(
             {
                 vol.Required(CONF_ACTION, default=ACTION_INSTALL): SelectSelector(
@@ -648,7 +706,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 self._notice = await async_translate(
                     self.hass,
                     "tracking_saved",
-                    repo=_repo_label(repo),
+                    repo=await self._async_repo_label(repo),
                 )
                 return await self.async_step_repository_action()
 
@@ -674,7 +732,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             data_schema=schema,
             errors=errors,
             description_placeholders={
-                "repo": _repo_label(repo),
+                "repo": await self._async_repo_label(repo),
                 "detail": self._error_detail,
             },
         )
@@ -712,7 +770,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             data_schema=schema,
             errors=errors,
             description_placeholders={
-                "repo": _repo_label(repo),
+                "repo": await self._async_repo_label(repo),
                 "integration": repo.integration_name or "?",
                 "detail": self._error_detail,
             },
@@ -840,22 +898,4 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         )
 
 
-def _repo_label(repo: Repository | None) -> str:
-    """One line per tracked integration: what it is and what is on disk."""
-    if not repo:
-        return "?"
-    installed = repo.installed_version or "not installed"
-    return " · ".join(
-        (
-            repo.full_name,
-            f"custom_components/{repo.integration_name or '?'}",
-            installed,
-            _tracking_label(repo),
-        )
-    )
 
-
-def _tracking_label(repo: Repository) -> str:
-    if repo.ref_type == REF_TYPE_RELEASE:
-        return "latest release"
-    return f"{repo.ref_type}:{repo.ref or 'default branch'}"

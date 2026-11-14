@@ -273,21 +273,10 @@ async def test_candidates_are_sorted_by_repository():
     ]
 
 
-def test_candidate_label_and_key():
-    candidate = Candidate(
-        full_name="owner/foo",
-        integration_name="foo",
-        version="1.0.0",
-        private=True,
-        installed=True,
-    )
+def test_candidate_key_is_the_selector_value():
+    candidate = Candidate(full_name="owner/foo", integration_name="foo")
 
     assert candidate.key == "owner/foo::foo"
-    assert "owner/foo" in candidate.label
-    assert "custom_components/foo" in candidate.label
-    assert "(1.0.0)" in candidate.label
-    assert "private" in candidate.label
-    assert "already installed" in candidate.label
 
 
 def test_candidate_key_is_unique_per_integration():
@@ -296,3 +285,81 @@ def test_candidate_key_is_unique_per_integration():
     second = Candidate(full_name="owner/foo", integration_name="two")
 
     assert first.key != second.key
+
+
+async def test_protected_folders_are_never_offered():
+    """This integration, HACS and the core folders cannot be installed over."""
+    names = ["private_integrations", "hacs", "marketplace", "homeassistant", "mine"]
+    client = FakeClient(
+        [repo()],
+        folders={"owner/foo": folder(*names)},
+        files={
+            ("owner/foo", f"custom_components/{name}/manifest.json"): manifest(name)
+            for name in names
+        },
+    )
+
+    discovery = await async_detect_integrations(client)
+
+    assert [candidate.integration_name for candidate in discovery.candidates] == [
+        "mine"
+    ]
+    assert client.file_calls == [
+        ("owner/foo", "custom_components/mine/manifest.json", "main")
+    ]
+
+
+async def test_a_rate_limit_without_results_is_raised():
+    """An empty list caused by the rate limit reads as "you have nothing"."""
+    import pytest
+
+    from custom_components.private_integrations.github import GitHubRateLimitError
+
+    client = FakeClient(
+        [repo()], folders={"owner/foo": GitHubRateLimitError("slow down", 30)}
+    )
+
+    with pytest.raises(GitHubRateLimitError):
+        await async_detect_integrations(client)
+
+
+async def test_a_rate_limit_with_results_keeps_them():
+    client = FakeClient(
+        [repo("owner/limited"), repo("owner/foo")],
+        folders={
+            "owner/limited": GitHubRateLimitError("slow down", 30),
+            "owner/foo": folder("foo"),
+        },
+        files={("owner/foo", "custom_components/foo/manifest.json"): manifest()},
+    )
+
+    discovery = await async_detect_integrations(client)
+
+    assert discovery.rate_limited is True
+    assert [candidate.full_name for candidate in discovery.candidates] == ["owner/foo"]
+
+
+async def test_unreadable_repositories_are_counted():
+    client = FakeClient(
+        [repo("owner/one"), repo("owner/two")],
+        folders={
+            "owner/one": GitHubError("no access"),
+            "owner/two": GitHubError("no access"),
+        },
+    )
+
+    discovery = await async_detect_integrations(client)
+
+    assert discovery.unreadable == 2
+    assert discovery.inspected == 2
+    assert discovery.candidates == []
+
+
+async def test_the_listing_says_how_many_repositories_github_returned():
+    """All tracked is not the same as "the token sees nothing"."""
+    client = FakeClient([repo("owner/foo")])
+
+    discovery = await async_detect_integrations(client, tracked=["owner/foo"])
+
+    assert discovery.listed == 1
+    assert discovery.inspected == 0

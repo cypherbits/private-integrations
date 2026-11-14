@@ -190,8 +190,19 @@ class PrivateIntegrationsManager:
 
         self._check_ref_type(ref_type)
 
-        if self.store.get(full_name):
-            raise HomeAssistantError(f"{full_name} is already tracked")
+        tracked = self.store.get(full_name)
+        if tracked is not None:
+            where = (
+                f" (custom_components/{tracked.integration_name})"
+                if tracked.integration_name
+                else ""
+            )
+            raise HomeAssistantError(
+                f"{full_name} is already tracked{where}. A repository can be "
+                "tracked once: remove it first to install a different "
+                "integration from it, or run Install / update on the one you "
+                "already have."
+            )
 
         self._assert_folder_is_free(full_name, integration_name)
 

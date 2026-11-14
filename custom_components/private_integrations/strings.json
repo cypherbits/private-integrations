@@ -136,7 +136,9 @@
       "add_failed": "Could not add the repository: {detail}",
       "action_failed": "Action failed: {detail}",
       "rate_limited": "GitHub rate limit reached: {detail}",
-      "no_candidates": "No integration was found in the repositories your token can read. They may all be tracked already, or none of them has a `custom_components/<name>/manifest.json` folder."
+      "no_candidates": "No integration was found in the repositories your token can read. They may all be tracked already, or none of them has a `custom_components/<name>/manifest.json` folder.",
+      "not_readable": "GitHub did not let this token read the contents of any repository. A fine-grained token needs **Repository permissions → Contents: Read-only** on the repositories you want to find, and the repositories must be in its 'Repository access' list.",
+      "no_repositories_visible": "GitHub returned no repositories for this token. A fine-grained token only sees the repositories added to its 'Repository access' list; a classic token sees everything the account can read."
     },
     "abort": {
       "no_repositories": "No repositories are tracked yet. Add one first.",
@@ -166,7 +168,12 @@
     "files_deleted": "were deleted from `custom_components/`",
     "files_kept": "were left on disk",
     "install_notification": "**{repo}** has been installed as `custom_components/{integration}/` (version: `{version}`).\n\n**Restart Home Assistant** to load the new integration. Until you restart, the files are on disk but not yet active.",
-    "install_notification_title": "Private Integrations: {integration} ready"
+    "install_notification_title": "Private Integrations: {integration} ready",
+    "not_installed": "not installed",
+    "latest_release": "latest release",
+    "default_branch": "default branch",
+    "flag_private": "private",
+    "flag_installed": "already installed"
   },
   "services": {
     "add_repository": {

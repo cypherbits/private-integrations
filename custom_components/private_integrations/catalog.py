@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .github import GitHubClient, GitHubError, GitHubRateLimitError
+from .installer import PROTECTED_INTEGRATIONS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,18 +53,6 @@ class Candidate:
         """Selector value, unique even when a repository holds several."""
         return f"{self.full_name}::{self.integration_name}"
 
-    @property
-    def label(self) -> str:
-        """Line shown in the list: what it is, and anything worth knowing."""
-        parts = [f"{self.full_name} — {CUSTOM_COMPONENTS}/{self.integration_name}"]
-        if self.version:
-            parts.append(f"({self.version})")
-        if self.private:
-            parts.append("· private")
-        if self.installed:
-            parts.append("· already installed")
-        return " ".join(parts)
-
 
 @dataclass(frozen=True)
 class Discovery:
@@ -71,8 +60,10 @@ class Discovery:
 
     candidates: list[Candidate] = field(default_factory=list)
     inspected: int = 0
+    listed: int = 0
     truncated: bool = False
     rate_limited: bool = False
+    unreadable: int = 0
 
 
 class _Budget:
@@ -127,9 +118,10 @@ async def async_detect_integrations(
     semaphore = asyncio.Semaphore(CONCURRENCY)
     candidates: list[Candidate] = []
     rate_limited = False
+    unreadable = 0
 
     async def inspect(repository: dict[str, Any]) -> None:
-        nonlocal rate_limited
+        nonlocal rate_limited, unreadable
         full_name = repository["full_name"]
         branch = repository.get("default_branch") or "main"
 
@@ -142,6 +134,7 @@ async def async_detect_integrations(
                 rate_limited = True
                 return
             except GitHubError as err:
+                unreadable += 1
                 _LOGGER.debug("Skipping %s during discovery: %s", full_name, err)
                 return
 
@@ -149,7 +142,11 @@ async def async_detect_integrations(
                 name = entry.get("name")
                 if entry.get("type") != "dir" or not isinstance(name, str):
                     continue
-                if not _VALID_DOMAIN.match(name) or not budget.take():
+                if (
+                    not _VALID_DOMAIN.match(name)
+                    or name in PROTECTED_INTEGRATIONS
+                    or not budget.take()
+                ):
                     continue
                 try:
                     text = await client.async_get_file_text(
@@ -179,12 +176,21 @@ async def async_detect_integrations(
 
     await asyncio.gather(*(inspect(repository) for repository in inspectable))
 
+    if rate_limited and not candidates:
+        # A partial list is still useful; an empty one caused by the rate limit
+        # is not, and would read as "you have no integrations".
+        raise GitHubRateLimitError(
+            "GitHub rate limit reached before any integration was found"
+        )
+
     candidates.sort(key=lambda c: (c.full_name.lower(), c.integration_name))
     return Discovery(
         candidates=candidates,
         inspected=len(inspectable),
+        listed=len(repositories),
         truncated=truncated,
         rate_limited=rate_limited,
+        unreadable=unreadable,
     )
 
 

@@ -877,10 +877,23 @@ async def test_removal_aborts_when_the_repository_vanished(hass, entry):
     assert result["type"] is data_entry_flow.FlowResultType.ABORT
 
 
-def test_repo_label_of_an_unknown_repository():
-    from custom_components.private_integrations.config_flow import _repo_label
+async def test_the_list_is_translated(hass, entry):
+    """The row is built in Python, so its words have to come from the files."""
+    hass.config.language = "es"
+    hass.data[DOMAIN][entry.entry_id]["store"].upsert(
+        Repository(full_name="owner/foo", ref_type="branch", integration_name="foo")
+    )
 
-    assert _repo_label(None) == "?"
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "manage_repository"}
+    )
+    selector = next(iter(result["data_schema"].schema.values()))
+    label = selector.config["options"][0]["label"]
+
+    assert "no instalada" in label
+    assert "rama por defecto" in label
+    assert "not installed" not in label
 
 
 async def test_an_error_detail_does_not_leak_into_the_next_step(
@@ -1150,7 +1163,7 @@ async def test_discovery_does_not_offer_tracked_repositories(
 async def test_discovery_without_results_explains_it(hass, entry, monkeypatch):
     from custom_components.private_integrations.catalog import Discovery
 
-    _fake_detection(monkeypatch, Discovery([], inspected=4))
+    _fake_detection(monkeypatch, Discovery([], inspected=4, listed=4))
 
     result = await _open_discover(hass, entry)
 
@@ -1236,6 +1249,8 @@ async def test_the_list_says_how_many_integrations_it_does_not_manage(
     for name in ("foo", "hacs", "other"):
         (components / name).mkdir(parents=True)
         (components / name / "manifest.json").write_text("{}")
+    # Not an integration, and not counted as one.
+    (components / "scratch").mkdir()
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
@@ -1243,4 +1258,142 @@ async def test_the_list_says_how_many_integrations_it_does_not_manage(
     )
 
     assert result["description_placeholders"]["count"] == "1"
-    assert result["description_placeholders"]["other"] == "2"
+    # "hacs" is protected and "scratch" has no manifest: only "other" is left.
+    assert result["description_placeholders"]["other"] == "1"
+
+
+async def test_discovery_with_no_visible_repositories_explains_it(
+    hass, entry, monkeypatch
+):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(monkeypatch, Discovery([], inspected=0))
+
+    result = await _open_discover(hass, entry)
+
+    assert result["errors"] == {"base": "no_repositories_visible"}
+
+
+async def test_discovery_that_could_not_read_anything_explains_it(
+    hass, entry, monkeypatch
+):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(
+        monkeypatch, Discovery([], inspected=3, listed=3, unreadable=3)
+    )
+
+    result = await _open_discover(hass, entry)
+
+    assert result["errors"] == {"base": "not_readable"}
+    assert result["description_placeholders"]["inspected"] == "3"
+
+
+async def test_discovery_with_every_repository_already_tracked_says_so(
+    hass, entry, monkeypatch
+):
+    """Not the same as "GitHub returned nothing": the token sees repositories."""
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(monkeypatch, Discovery([], inspected=0, listed=4))
+
+    result = await _open_discover(hass, entry)
+
+    assert result["errors"] == {"base": "no_candidates"}
+    assert result["description_placeholders"]["inspected"] == "0"
+
+
+async def test_both_lists_are_rendered_as_lists_not_dropdowns(hass, entry, monkeypatch):
+    """The point of the screen is reading a list, not opening a dropdown."""
+    from homeassistant.helpers.selector import SelectSelectorMode
+
+    from custom_components.private_integrations.catalog import Discovery
+
+    hass.data[DOMAIN][entry.entry_id]["store"].upsert(
+        Repository(full_name="owner/foo", ref="main", integration_name="foo")
+    )
+    _fake_detection(monkeypatch, Discovery([_candidate()], inspected=1, listed=1))
+
+    manage = await hass.config_entries.options.async_init(entry.entry_id)
+    manage = await hass.config_entries.options.async_configure(
+        manage["flow_id"], {"next_step_id": "manage_repository"}
+    )
+    proposals = await _open_discover(hass, entry)
+
+    for result in (manage, proposals):
+        schema = result["data_schema"].schema
+        selector = next(iter(schema.values()))
+        assert selector.config["mode"] == SelectSelectorMode.LIST.value
+
+
+async def test_discovery_end_to_end_with_the_real_github_client(
+    hass, entry, aioclient_mock
+):
+    """No patched lookup: the real client, its URLs and the flow together."""
+    import base64
+
+    list_url = (
+        "https://api.github.com/user/repos?per_page=100&page=1&sort=updated"
+        "&affiliation=owner%2Ccollaborator%2Corganization_member"
+    )
+    aioclient_mock.get(
+        list_url,
+        json=[
+            {
+                "full_name": "owner/foo",
+                "default_branch": "main",
+                "private": True,
+            },
+            {"full_name": "owner/no_integration", "default_branch": "main"},
+        ],
+    )
+    aioclient_mock.get(
+        "https://api.github.com/repos/owner/foo/contents/custom_components?ref=main",
+        json=[{"name": "foo", "type": "dir"}],
+    )
+    aioclient_mock.get(
+        "https://api.github.com/repos/owner/foo/contents/custom_components/foo"
+        "/manifest.json?ref=main",
+        json={
+            "encoding": "base64",
+            "content": base64.b64encode(
+                json.dumps({"domain": "foo", "version": "0.9.0"}).encode()
+            ).decode(),
+        },
+    )
+    aioclient_mock.get(
+        "https://api.github.com/repos/owner/no_integration"
+        "/contents/custom_components?ref=main",
+        status=404,
+    )
+
+    result = await _open_discover(hass, entry)
+
+    assert result["step_id"] == "proposals"
+    assert result["description_placeholders"]["count"] == "1"
+    selector = next(iter(result["data_schema"].schema.values()))
+    assert selector.config["options"][0]["label"] == (
+        "owner/foo — custom_components/foo (0.9.0) · private"
+    )
+
+
+async def test_discovery_end_to_end_when_nothing_is_installable(
+    hass, entry, aioclient_mock
+):
+    list_url = (
+        "https://api.github.com/user/repos?per_page=100&page=1&sort=updated"
+        "&affiliation=owner%2Ccollaborator%2Corganization_member"
+    )
+    aioclient_mock.get(
+        list_url, json=[{"full_name": "owner/plain", "default_branch": "main"}]
+    )
+    aioclient_mock.get(
+        "https://api.github.com/repos/owner/plain/contents/custom_components?ref=main",
+        status=404,
+    )
+
+    result = await _open_discover(hass, entry)
+
+    assert result["step_id"] == "discover"
+    assert result["errors"] == {"base": "no_candidates"}
+    assert result["description_placeholders"]["inspected"] == "1"

@@ -1125,3 +1125,21 @@ async def test_an_unchanged_install_updates_the_version_label(aioclient_mock, ma
 
     assert repo.installed_version == "v1.0"
     assert repo.installed_sha == SHA
+
+
+async def test_adding_a_tracked_repository_says_which_folder_it_owns(
+    aioclient_mock, manager
+):
+    """The same repository cannot be tracked twice, and the error says why."""
+    manager.store.upsert(
+        Repository(
+            full_name="owner/foo", ref="main", integration_name="foo"
+        )
+    )
+
+    with pytest.raises(HomeAssistantError) as err:
+        await manager.add_repository("owner/foo")
+
+    message = str(err.value)
+    assert "custom_components/foo" in message
+    assert "tracked once" in message
