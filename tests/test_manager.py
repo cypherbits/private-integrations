@@ -1206,3 +1206,14 @@ async def test_updating_tracking_cannot_resurrect_a_removed_repository(
     await asyncio.gather(update, remove)
 
     assert manager.store.get("owner/foo") is None
+
+
+async def test_install_blocker_normalises_the_folder_name(manager):
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    (dest / "manifest.json").write_text('{"domain": "foo"}')
+
+    for name in (" foo ", "foo\n", "\tfoo"):
+        blocker = await manager.install_blocker("owner/foo", name)
+        assert blocker is not None, name
+        assert "already exists" in blocker, name

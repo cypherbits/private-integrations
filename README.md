@@ -150,12 +150,13 @@ Notes:
   removal deletes the old registry (the installed files stay). If the entry is
   already gone, add the new integration with a token; the registry is imported
   if the file still exists.
-- If a tracked folder has no marker at all, the migration adopts it only when
-  its repository is listed in the old `private_hacs` registry and its
-  `manifest.json` domain matches the folder. A repository added after the
-  migration never claims a folder that another tool installed. If the old
-  registry is gone, set the folder and install it again, or create
-  `.private_integrations.json` by hand.
+- If a tracked folder has no marker at all, the migration adopts it only while
+  importing: the old `private_hacs` registry must list the same repository and
+  integration folder as installed, and the folder's `manifest.json` domain must
+  match. After the import, an unmarked folder is treated as foreign, so a
+  repository added or changed later never claims a folder another tool
+  installed. If the old registry is gone, set the folder and install it again,
+  or create `.private_integrations.json` by hand.
 - The old `private_hacs` and the new `private_integrations` can be loaded at the
   same time during the transition, but do not manage the same folders with both.
   Remove the old one after checking the import.

@@ -392,6 +392,14 @@ def _recover_entry(entry: Path) -> list[str]:
     if not integration or not is_valid_integration_name(integration):
         # Not a backup we could have created; leave it alone.
         return []
+    if integration in PROTECTED_INTEGRATIONS:
+        _LOGGER.warning(
+            "Private Integrations: not restoring %s, %s is a protected "
+            "integration",
+            name,
+            integration,
+        )
+        return []
     if not _is_real_dir(entry):
         _LOGGER.warning(
             "Private Integrations: not restoring %s, it is not a directory", name

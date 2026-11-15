@@ -622,6 +622,11 @@ class PrivateIntegrationsManager:
         repository behind when the install cannot succeed. An unmarked folder
         is not adoptable; one whose owner is no longer tracked is.
         """
+        # add_repository() strips this value too; normalise here so the folder
+        # that is checked is the folder that will be installed. Without it,
+        # " foo " was considered invalid and the preflight was skipped, only for
+        # add_repository() to accept it as "foo".
+        integration_name = (integration_name or "").strip() or None
         if not integration_name:
             return None
         try:

@@ -54,6 +54,21 @@ def _new_store(config_dir):
     return config_dir / ".storage" / "private_integrations.repositories"
 
 
+def _write_new_store(config_dir, repositories):
+    (config_dir / ".storage").mkdir(parents=True, exist_ok=True)
+    _new_store(config_dir).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "minor_version": 1,
+                "key": "private_integrations.repositories",
+                "data": {"repositories": repositories},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_migrates_the_registry_and_the_marker(tmp_path):
     _old_store(tmp_path, [_repo()])
     folder = _folder(tmp_path)
@@ -287,3 +302,104 @@ def test_no_old_installation_is_a_noop(tmp_path):
     assert result.actions == []
     assert result.repositories == []
     assert not _new_store(tmp_path).exists()
+
+
+def test_a_foreign_folder_is_not_adopted_after_the_import(tmp_path):
+    """Once the new registry exists, an unmarked folder is not ours."""
+    _old_store(tmp_path, [_repo()])
+    _write_new_store(tmp_path, [_repo()])
+    folder = _folder(tmp_path)
+
+    result = migrate_private_hacs(tmp_path)
+
+    assert not (folder / NEW_MARKER).exists()
+    assert not any("adopted" in action for action in result.actions)
+
+
+def test_a_different_folder_of_the_same_repo_is_not_adopted(tmp_path):
+    """The old registry only knows the folder it actually tracked."""
+    _old_store(tmp_path, [_repo(integration_name="foo")])
+    _write_new_store(tmp_path, [_repo(integration_name="bar")])
+    folder = _folder(tmp_path, integration="bar")
+
+    migrate_private_hacs(tmp_path)
+
+    assert not (folder / NEW_MARKER).exists()
+
+
+def test_a_repository_never_installed_does_not_adopt(tmp_path):
+    """A tracked repository without an installation has no folder to claim."""
+    _old_store(
+        tmp_path, [_repo(installed_version=None, installed_sha=None)]
+    )
+    folder = _folder(tmp_path)
+
+    migrate_private_hacs(tmp_path)
+
+    assert not (folder / NEW_MARKER).exists()
+
+
+def test_a_marker_with_a_url_is_renamed(tmp_path):
+    """installed_owner() normalises markers; the migration must too."""
+    _old_store(tmp_path, [_repo()])
+    folder = _folder(tmp_path)
+    old_marker = folder / ".private_hacs.json"
+    old_marker.write_text(
+        json.dumps({"full_name": "https://github.com/owner/foo"}),
+        encoding="utf-8",
+    )
+
+    result = migrate_private_hacs(tmp_path)
+
+    assert not old_marker.exists()
+    assert (folder / NEW_MARKER).is_file()
+    assert any("renamed the ownership marker" in action for action in result.actions)
+
+
+def test_an_old_marker_is_renamed_when_the_new_registry_exists(tmp_path):
+    """A partial migration still gets its marker, without adopting folders."""
+    _old_store(tmp_path, [_repo()])
+    _write_new_store(tmp_path, [_repo()])
+    folder = _folder(tmp_path)
+    old_marker = folder / ".private_hacs.json"
+    old_marker.write_text(
+        json.dumps({"full_name": "owner/foo"}), encoding="utf-8"
+    )
+
+    migrate_private_hacs(tmp_path)
+
+    assert not old_marker.exists()
+    assert (folder / NEW_MARKER).is_file()
+
+
+def test_a_protected_folder_is_left_untouched(tmp_path):
+    """private_hacs is protected even while importing the old registry."""
+    _old_store(tmp_path, [_repo(integration_name="private_hacs")])
+    folder = _folder(tmp_path, integration="private_hacs", domain="private_hacs")
+
+    migrate_private_hacs(tmp_path)
+
+    assert not (folder / NEW_MARKER).exists()
+
+
+def test_old_registry_names_are_normalised(tmp_path):
+    """A URL or padded name must not be dropped by the new store."""
+    _old_store(
+        tmp_path,
+        [
+            _repo(
+                full_name="https://github.com/owner/foo",
+                integration_name=" foo ",
+            )
+        ],
+    )
+    folder = _folder(tmp_path)
+
+    migrate_private_hacs(tmp_path)
+
+    envelope = json.loads(_new_store(tmp_path).read_text(encoding="utf-8"))
+    entry = envelope["data"]["repositories"][0]
+    assert entry["full_name"] == "owner/foo"
+    assert entry["integration_name"] == "foo"
+    marker = json.loads((folder / NEW_MARKER).read_text(encoding="utf-8"))
+    assert marker["full_name"] == "owner/foo"

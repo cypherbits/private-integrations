@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import re
 
-_INTEGRATION_NAME = re.compile(r"^[a-z0-9_]+$")
+_INTEGRATION_NAME = re.compile(r"[a-z0-9_]+")
 
 
 def is_valid_integration_name(value: object) -> bool:
     """True when ``value`` can be a ``custom_components`` folder name."""
-    return isinstance(value, str) and _INTEGRATION_NAME.match(value) is not None
+    return isinstance(value, str) and _INTEGRATION_NAME.fullmatch(value) is not None

@@ -136,8 +136,8 @@
       "add_failed": "Could not add the repository: {detail}",
       "action_failed": "Action failed: {detail}",
       "rate_limited": "GitHub rate limit reached: {detail}",
-      "no_candidates": "No integration was found in the repositories your token can read. They may all be tracked already, or none of them has a folder under `custom_components/` with a `manifest.json`.",
-      "not_readable": "GitHub did not let this token read the contents of any repository. A fine-grained token needs **Repository permissions → Contents: Read-only** on the repositories you want to find, and the repositories must be in its 'Repository access' list.",
+      "no_candidates": "No integration was found in the repositories your token can read. They may all be tracked already, or none of them has a folder under `custom_components/` with a `manifest.json`.\n\n{detail}",
+      "not_readable": "GitHub did not let this token read the contents of any repository. A fine-grained token needs **Repository permissions → Contents: Read-only** on the repositories you want to find, and the repositories must be in its 'Repository access' list.\n\n{detail}",
       "no_repositories_visible": "GitHub returned no repositories for this token. A fine-grained token only sees the repositories added to its 'Repository access' list; a classic token sees everything the account can read."
     },
     "abort": {

@@ -702,3 +702,20 @@ def test_installed_owner_rejects_a_malformed_marker(tmp_path):
 def test_private_hacs_is_protected():
     with pytest.raises(InstallerError, match="protected"):
         validate_integration_name("private_hacs")
+
+
+def test_a_trailing_newline_is_not_a_valid_folder_name():
+    with pytest.raises(InstallerError, match="folder name"):
+        validate_integration_name("foo\n")
+
+
+def test_a_protected_backup_is_not_restored(tmp_path):
+    backup = tmp_path / ".private_hacs.private_integrations-backup"
+    backup.mkdir()
+    (backup / "manifest.json").write_text("{}", encoding="utf-8")
+
+    actions = recover_stale_installs(tmp_path)
+
+    assert not (tmp_path / "private_hacs").exists()
+    assert backup.is_dir()
+    assert actions == []

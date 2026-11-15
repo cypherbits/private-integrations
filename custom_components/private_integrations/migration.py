@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .const import OLD_DOMAIN, STORAGE_KEY, STORAGE_VERSION
+from .installer import PROTECTED_INTEGRATIONS
 from .names import is_valid_integration_name
 from .refs import parse_repo_reference
 
@@ -49,10 +50,10 @@ def migrate_private_hacs(config_dir: Path) -> MigrationResult:
     yet).
 
     A marker is renamed for any tracked folder that carries the previous name.
-    An unmarked folder is adopted only when its repository is in the old
-    registry: that registry is the only proof that the folder was installed by
-    the previous integration. A repository added afterwards must never claim a
-    folder that another tool installed.
+    An unmarked folder is adopted only while the old registry is being imported,
+    and only when that registry records the same repository and integration
+    folder as an installed one. After the import, an unmarked folder belongs to
+    no tracked repository here: another tool may have installed it.
     """
     config_dir = Path(config_dir)
     actions: list[str] = []
@@ -95,29 +96,60 @@ def _repositories(envelope: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [repo for repo in repositories if isinstance(repo, dict)]
 
 
+def _normalise_entry(repo: dict[str, Any]) -> dict[str, Any]:
+    """Normalise the fields this integration stores in a fixed shape.
+
+    Older registries may have a full URL or surrounding whitespace where the
+    current store expects ``owner/repo`` and a bare folder name. The store
+    rejects those entries, so normalise them while importing instead of
+    silently losing the repository.
+    """
+    full_name = repo.get("full_name")
+    if isinstance(full_name, str):
+        try:
+            normalised = parse_repo_reference(full_name)
+        except ValueError:
+            pass
+        else:
+            if normalised != full_name:
+                repo = {**repo, "full_name": normalised}
+
+    integration_name = repo.get("integration_name")
+    if isinstance(integration_name, str):
+        normalised_name = integration_name.strip() or None
+        if normalised_name != integration_name:
+            repo = {**repo, "integration_name": normalised_name}
+    return repo
+
+
 def _migrate_store(
     config_dir: Path, actions: list[str]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, set[str]]]:
     """Copy the old registry to the new key, unless one already exists.
 
     Returns the entries used to migrate markers, the entries that were imported
-    (empty when the new registry was already authoritative) and the repository
-    names from the old registry, the only ones allowed to adopt an unmarked
-    folder.
+    (empty when the new registry was already authoritative) and the integration
+    folders the old registry is allowed to adopt. The last one is only filled
+    while the import happens: once the new registry exists, an unmarked folder
+    belongs to no one here and must stay foreign.
     """
     storage = config_dir / ".storage"
     old_path = storage / OLD_STORE_KEY
     new_path = storage / STORAGE_KEY
 
-    old_repositories = _old_repositories(old_path)
-    adoptable = _repository_names(old_repositories)
-
     new_envelope = _read_object(new_path) if new_path.is_file() else None
     if new_path.exists():
         # The new registry is authoritative even when it is empty: its absence
         # is what marks the import as pending. Re-importing an empty registry
-        # would resurrect repositories the user removed.
-        return _repositories(new_envelope), [], adoptable
+        # would resurrect repositories the user removed. Adoption is disabled
+        # for the same reason: an unmarked folder found after the import may be
+        # a replacement installed by another tool.
+        return _repositories(new_envelope), [], {}
+
+    old_repositories = [
+        _normalise_entry(repo) for repo in _old_repositories(old_path)
+    ]
+    adoptable = _repository_names(old_repositories)
     if not old_repositories:
         return [], [], adoptable
 
@@ -142,14 +174,44 @@ def _old_repositories(path: Path) -> list[dict[str, Any]]:
     return _repositories(_read_object(path))
 
 
-def _repository_names(repositories: list[dict[str, Any]]) -> set[str]:
-    """Lowercased names of the repositories in the old registry."""
-    names: set[str] = set()
+def _repository_names(
+    repositories: list[dict[str, Any]],
+) -> dict[str, set[str]]:
+    """Integration folders each repository in the old registry may own."""
+    names: dict[str, set[str]] = {}
     for repo in repositories:
         full_name = repo.get("full_name")
-        if isinstance(full_name, str) and full_name:
-            names.add(full_name.lower())
+        integration_name = repo.get("integration_name")
+        if not isinstance(full_name, str) or not full_name:
+            continue
+        if not is_valid_integration_name(integration_name):
+            continue
+        try:
+            normalised = parse_repo_reference(full_name)
+        except ValueError:
+            continue
+        names.setdefault(normalised.lower(), set()).add(integration_name)
     return names
+
+
+def _was_installed(repo: dict[str, Any]) -> bool:
+    """True when the old registry records an actual installation."""
+    return any(
+        isinstance(value, str) and bool(value)
+        for value in (repo.get("installed_sha"), repo.get("installed_version"))
+    )
+
+
+def _marker_owner(path: Path) -> str | None:
+    """Repository named by an old ownership marker, normalised."""
+    marker = _read_object(path)
+    owner = marker.get("full_name") if marker is not None else None
+    if not isinstance(owner, str):
+        return None
+    try:
+        return parse_repo_reference(owner)
+    except ValueError:
+        return None
 
 
 def _migrate_markers(
@@ -157,7 +219,7 @@ def _migrate_markers(
     repositories: list[dict[str, Any]],
     actions: list[str],
     *,
-    adoptable: set[str],
+    adoptable: dict[str, set[str]],
 ) -> None:
     """Rename markers, and adopt unmarked folders only from the old registry."""
     root = (config_dir / "custom_components").resolve()
@@ -171,6 +233,13 @@ def _migrate_markers(
                 full_name,
             )
             continue
+        if integration_name in PROTECTED_INTEGRATIONS:
+            _LOGGER.debug(
+                "Private Integrations: not touching the protected integration "
+                "'%s'",
+                integration_name,
+            )
+            continue
         if not isinstance(full_name, str) or not full_name:
             _LOGGER.warning(
                 "Private Integrations: a repository in %s has no name",
@@ -178,7 +247,7 @@ def _migrate_markers(
             )
             continue
         try:
-            parse_repo_reference(full_name)
+            normalised_full_name = parse_repo_reference(full_name)
         except ValueError:
             _LOGGER.warning(
                 "Private Integrations: %r is not 'owner/repo'; not looking "
@@ -203,9 +272,8 @@ def _migrate_markers(
 
         old_marker = _find_old_marker(folder)
         if old_marker is not None:
-            marker = _read_object(old_marker)
-            owner = marker.get("full_name") if marker is not None else None
-            if not isinstance(owner, str) or owner.lower() != full_name.lower():
+            owner = _marker_owner(old_marker)
+            if owner is None or owner.lower() != normalised_full_name.lower():
                 _LOGGER.warning(
                     "Private Integrations: %s does not belong to %s; "
                     "leaving it untouched",
@@ -219,9 +287,14 @@ def _migrate_markers(
             )
             continue
 
-        if full_name.lower() not in adoptable:
-            # A repository added after the migration: an unmarked folder is
-            # not demonstrably ours, so it stays foreign.
+        if integration_name not in adoptable.get(
+            normalised_full_name.lower(), set()
+        ):
+            # A repository added after the migration, or a folder the old
+            # registry never recorded for this repository: it stays foreign.
+            continue
+        if not _was_installed(repo):
+            # A repository tracked without files never installed this folder.
             continue
 
         # The old registry says this repository installed the folder, but the
@@ -236,7 +309,7 @@ def _migrate_markers(
             )
             continue
         marker = {
-            "full_name": full_name,
+            "full_name": normalised_full_name,
             "integration_name": integration_name,
             "installed_version": repo.get("installed_version"),
             "installed_sha": repo.get("installed_sha"),

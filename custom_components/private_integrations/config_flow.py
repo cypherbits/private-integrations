@@ -430,14 +430,15 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             return self._show_discover("cannot_connect", "")
 
         if not discovery.candidates:
+            note = await self._async_discovery_note(discovery)
             if discovery.listed == 0:
-                return self._show_discover("no_repositories_visible", "")
+                return self._show_discover("no_repositories_visible", note)
             if discovery.inspected and discovery.unreadable == discovery.inspected:
                 return self._show_discover(
-                    "not_readable", "", inspected=discovery.inspected
+                    "not_readable", note, inspected=discovery.inspected
                 )
             return self._show_discover(
-                "no_candidates", "", inspected=discovery.inspected
+                "no_candidates", note, inspected=discovery.inspected
             )
 
         _LOGGER.debug(
@@ -659,8 +660,12 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         translated. The repository and folder names are not translated, they
         are identifiers.
         """
-        version = await self._async_installed_version(repo)
-        if version is None:
+        owned, version = await self._async_installed_state(repo)
+        if not owned:
+            # The folder, if it exists, belongs to another tool. Do not show
+            # the tracked ref as if it were the installed version.
+            version = await async_translate(self.hass, "not_installed")
+        elif version is None:
             version = repo.installed_version or await async_translate(
                 self.hass, "not_installed"
             )
@@ -684,24 +689,27 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             return f"custom_components/{repo.integration_name}"
         return await async_translate(self.hass, "folder_not_chosen")
 
-    async def _async_installed_version(self, repo: Repository) -> str | None:
-        """Version in the installed manifest, or None when it cannot be read.
+    async def _async_installed_state(
+        self, repo: Repository
+    ) -> tuple[bool, str | None]:
+        """Whether the folder is this repository's, and its installed version.
 
         The ownership marker decides: a tracked repository without files must
         not display the version of a folder another tool put under the same
         name.
         """
         if not repo.integration_name:
-            return None
+            return False, None
         root = Path(self.hass.config.path("custom_components"))
         owner = await self.hass.async_add_executor_job(
             installed_owner, root / repo.integration_name
         )
         if owner is None or owner.lower() != repo.full_name.lower():
-            return None
-        return await self.hass.async_add_executor_job(
+            return False, None
+        version = await self.hass.async_add_executor_job(
             installed_manifest_version, root, repo.integration_name
         )
+        return True, version
 
     async def _async_candidate_label(self, candidate: Candidate) -> str:
         """One proposal: what it is, and anything worth knowing about it."""
@@ -909,17 +917,21 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
 
         full_name: str = getattr(self, "_installed_repo_name", "")
         repo = get_manager(self.hass).store.get(full_name) if full_name else None
-        version = await self._async_installed_version(repo) if repo else None
-        if version is None and repo is not None:
+        owned, version = (
+            await self._async_installed_state(repo) if repo else (False, None)
+        )
+        if version is None and owned and repo is not None:
             version = repo.installed_version or (
                 repo.installed_sha[:7] if repo.installed_sha else None
             )
+        integration = repo.integration_name if repo else None
         return self.async_show_form(
             step_id="installed_confirmation",
             data_schema=vol.Schema({}),
             description_placeholders={
                 "repo": full_name or "?",
-                "integration": (repo.integration_name if repo else "?") or "?",
+                "integration": integration
+                or await async_translate(self.hass, "folder_not_chosen"),
                 "version": version or "?",
             },
             last_step=True,

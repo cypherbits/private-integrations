@@ -1559,3 +1559,79 @@ async def test_discovery_end_to_end_when_nothing_is_installable(
     assert result["step_id"] == "discover"
     assert result["errors"] == {"base": "no_candidates"}
     assert result["description_placeholders"]["inspected"] == "1"
+
+
+async def test_add_with_a_padded_foreign_folder_is_refused_before_tracking(
+    hass, entry
+):
+    from pathlib import Path
+
+    folder = Path(hass.config.path("custom_components")) / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text('{"domain": "foo"}', encoding="utf-8")
+
+    result = await _open_add(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        _add_input(install_now=True, integration_name=" foo "),
+    )
+
+    assert result["step_id"] == "add_repository"
+    assert result["errors"] == {"base": "add_failed"}
+    assert "already exists" in result["description_placeholders"]["detail"]
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+    assert store.get("owner/foo") is None
+
+
+async def test_a_capped_search_with_no_candidates_says_so(
+    hass, entry, monkeypatch
+):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(
+        monkeypatch,
+        Discovery(
+            [],
+            inspected=60,
+            listed=100,
+            truncated=True,
+            manifests_truncated=True,
+        ),
+    )
+
+    result = await _open_discover(hass, entry)
+
+    assert result["step_id"] == "discover"
+    assert result["errors"] == {"base": "no_candidates"}
+    detail = result["description_placeholders"]["detail"]
+    assert "Only the first" in detail
+    assert "manifests" in detail
+
+
+async def test_the_list_does_not_show_a_version_for_a_foreign_folder(hass, entry):
+    from pathlib import Path
+
+    folder = Path(hass.config.path("custom_components")) / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text(
+        '{"domain": "foo", "version": "9.9.9"}', encoding="utf-8"
+    )
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+    store.upsert(
+        Repository(
+            full_name="owner/foo",
+            ref="main",
+            integration_name="foo",
+            installed_version="main",
+        )
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "manage_repository"}
+    )
+    selector = next(iter(result["data_schema"].schema.values()))
+    label = selector.config["options"][0]["label"]
+
+    assert "not installed" in label
+    assert "9.9.9" not in label

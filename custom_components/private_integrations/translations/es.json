@@ -136,8 +136,8 @@
       "add_failed": "No se pudo añadir el repositorio: {detail}",
       "action_failed": "La acción falló: {detail}",
       "rate_limited": "Se alcanzó el límite de peticiones de GitHub: {detail}",
-      "no_candidates": "No se encontró ninguna integración en los repositorios que tu token puede leer. Puede que ya las sigas todas, o que ninguna tenga una carpeta dentro de `custom_components/` con un `manifest.json`.",
-      "not_readable": "GitHub no dejó que este token leyera el contenido de ningún repositorio. Un token fine-grained necesita **Repository permissions → Contents: Read-only** en los repositorios que quieras encontrar, y esos repositorios tienen que estar en su lista de 'Repository access'.",
+      "no_candidates": "No se encontró ninguna integración en los repositorios que tu token puede leer. Puede que ya las sigas todas, o que ninguna tenga una carpeta dentro de `custom_components/` con un `manifest.json`.\n\n{detail}",
+      "not_readable": "GitHub no dejó que este token leyera el contenido de ningún repositorio. Un token fine-grained necesita **Repository permissions → Contents: Read-only** en los repositorios que quieras encontrar, y esos repositorios tienen que estar en su lista de 'Repository access'.\n\n{detail}",
       "no_repositories_visible": "GitHub no devolvió ningún repositorio para este token. Un token fine-grained solo ve los repositorios añadidos a su lista de 'Repository access'; uno clásico ve todo lo que puede leer la cuenta."
     },
     "abort": {
