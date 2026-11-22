@@ -54,22 +54,23 @@
       },
       "discover": {
         "title": "Buscar integraciones",
-        "description": "Se revisa cada repositorio que tu token puede leer buscando una carpeta dentro de `custom_components/` que tenga un `manifest.json`. Se revisaron **{inspected}** repositorios (hasta {limit}, los actualizados más recientemente primero).\n\nLos repositorios que ya sigues no se vuelven a ofrecer. Un token fine-grained solo ve los repositorios a los que se le dio acceso; uno clásico ve todo lo que ve la cuenta.\n\nEnvía para volver al menú."
+        "description": "Se revisa cada repositorio **privado** que tu token puede leer buscando una carpeta dentro de `custom_components/` que tenga un `manifest.json`. Se revisaron **{inspected}** repositorios (hasta {limit}, los actualizados más recientemente primero).\n\nLos repositorios públicos no se listan: de esos se encarga el Marketplace. Los repositorios que ya sigues no se vuelven a ofrecer. Un token fine-grained solo ve los repositorios a los que se le dio acceso; uno clásico ve todo lo que ve la cuenta.\n\nEnvía para volver al menú."
       },
       "proposals": {
         "title": "Integraciones encontradas",
-        "description": "**{count}** integración(es) encontradas en repositorios que aún no sigues. Elige una: no se descarga nada hasta que confirmes en la pantalla siguiente.\n\n{note}",
+        "description": "**{count}** integración(es) encontradas en repositorios privados que aún no sigues. Las tuyas salen primero, las instaladas antes que el resto, y los repositorios compartidos contigo aparecen después del separador. Elige una: no se descarga nada hasta que confirmes en la pantalla siguiente.\n\n{note}",
         "data": {
           "full_name": "Integración"
         }
       },
       "proposal": {
         "title": "{repo}",
-        "description": "**{repo}** ofrece `custom_components/{integration}` (versión `{version}` en su rama por defecto `{branch}`).\n\n¿Cómo quieres seguirla? **Release** necesita que el repositorio tenga una release publicada. **Rama** sigue la rama por defecto del repositorio si dejas la referencia vacía.\n\nCon **Instalar inmediatamente** marcado los archivos se escriben en `custom_components/` al momento, y hace falta reiniciar para cargarlos.",
+        "description": "**{repo}** ofrece `custom_components/{integration}` (versión `{version}` en su rama por defecto `{branch}`).\n\n¿Cómo quieres seguirla? **Release** necesita que el repositorio tenga una release publicada. **Rama** sigue la rama por defecto del repositorio si dejas la referencia vacía.\n\nCon **Instalar inmediatamente** marcado los archivos se escriben en `custom_components/` al momento, y hace falta reiniciar para cargarlos.\n\nSi la carpeta ya está en disco y no se gestiona aquí, marca **Adoptar** para tomarla. Con **Instalar inmediatamente** desmarcado, la adopción se guarda para la próxima instalación.",
         "data": {
           "ref_type": "Seguir por",
           "ref": "Tag / rama / commit (vacío para la rama por defecto)",
-          "install_now": "Instalar inmediatamente después de añadir"
+          "install_now": "Instalar inmediatamente después de añadir",
+          "adopt": "Adoptar la carpeta existente y gestionarla desde aquí"
         }
       },
       "manage_repository": {
@@ -136,7 +137,7 @@
       "add_failed": "No se pudo añadir el repositorio: {detail}",
       "action_failed": "La acción falló: {detail}",
       "rate_limited": "Se alcanzó el límite de peticiones de GitHub: {detail}",
-      "no_candidates": "No se encontró ninguna integración en los repositorios que tu token puede leer. Puede que ya las sigas todas, o que ninguna tenga una carpeta dentro de `custom_components/` con un `manifest.json`.\n\n{detail}",
+      "no_candidates": "No se encontró ninguna integración privada en los repositorios que tu token puede leer. Los repositorios públicos se omiten porque el Marketplace se encarga de ellos. Puede que ya las sigas todas, o que ninguna tenga una carpeta dentro de `custom_components/` con un `manifest.json`.\n\n{detail}",
       "not_readable": "GitHub no dejó que este token leyera el contenido de ningún repositorio. Un token fine-grained necesita **Repository permissions → Contents: Read-only** en los repositorios que quieras encontrar, y esos repositorios tienen que estar en su lista de 'Repository access'.\n\n{detail}",
       "no_repositories_visible": "GitHub no devolvió ningún repositorio para este token. Un token fine-grained solo ve los repositorios añadidos a su lista de 'Repository access'; uno clásico ve todo lo que puede leer la cuenta."
     },
@@ -174,7 +175,10 @@
     "latest_release": "última release",
     "default_branch": "rama por defecto",
     "flag_private": "privada",
+    "flag_shared": "compartida",
     "flag_installed": "ya instalada",
+    "section_private": "Tus repositorios privados",
+    "section_shared": "Compartidos contigo",
     "folder_not_chosen": "carpeta sin elegir",
     "discovery_truncated": "Solo se revisaron los primeros {limit} repositorios, empezando por los actualizados más recientemente: puede que falten integraciones.",
     "discovery_manifests_truncated": "La búsqueda se detuvo tras leer {limit} manifests: puede que algunos repositorios no se revisaran del todo.",

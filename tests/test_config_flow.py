@@ -9,6 +9,7 @@ from homeassistant import config_entries, data_entry_flow
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.private_integrations.const import (
+    CONF_ADOPT,
     CONF_FULL_NAME,
     CONF_GITHUB_TOKEN,
     CONF_INTEGRATION_NAME,
@@ -350,7 +351,7 @@ async def test_options_force_reinstall(hass, entry, monkeypatch):
 
     calls: list[tuple[str, bool]] = []
 
-    async def fake_install(self, full_name, *, force=False):
+    async def fake_install(self, full_name, *, force=False, adopt=False):
         calls.append((full_name, force))
         raise HomeAssistantError("stop here")
 
@@ -384,7 +385,7 @@ async def test_options_update_without_force(hass, entry, monkeypatch):
 
     calls: list[tuple[str, bool]] = []
 
-    async def fake_install(self, full_name, *, force=False):
+    async def fake_install(self, full_name, *, force=False, adopt=False):
         calls.append((full_name, force))
         raise HomeAssistantError("stop here")
 
@@ -558,7 +559,7 @@ async def test_add_repository_that_is_already_installed(
         PrivateIntegrationsManager,
     )
 
-    async def fake_install(self, full_name, *, force=False):
+    async def fake_install(self, full_name, *, force=False, adopt=False):
         return InstallResult(self.store.get(full_name), changed=False)
 
     monkeypatch.setattr(PrivateIntegrationsManager, "install_or_update", fake_install)
@@ -828,7 +829,7 @@ async def test_options_install_that_changes_nothing_says_so(
         PrivateIntegrationsManager,
     )
 
-    async def fake_install(self, full_name, *, force=False):
+    async def fake_install(self, full_name, *, force=False, adopt=False):
         return InstallResult(self.store.get(full_name), changed=False)
 
     monkeypatch.setattr(PrivateIntegrationsManager, "install_or_update", fake_install)
@@ -925,7 +926,7 @@ async def test_an_error_detail_does_not_leak_into_the_next_step(
         PrivateIntegrationsManager,
     )
 
-    async def failing_install(self, full_name, *, force=False):
+    async def failing_install(self, full_name, *, force=False, adopt=False):
         raise HomeAssistantError("the download exploded")
 
     monkeypatch.setattr(
@@ -1166,6 +1167,176 @@ async def test_a_proposal_says_when_the_folder_is_already_on_disk(
     assert "already installed" in selector.config["options"][0]["label"]
 
 
+async def test_proposals_separate_own_and_shared_repositories(
+    hass, entry, monkeypatch
+):
+    from custom_components.private_integrations.catalog import Discovery
+
+    _fake_detection(
+        monkeypatch,
+        Discovery(
+            [
+                _candidate(
+                    full_name="owner/installed",
+                    integration_name="own_installed",
+                    installed=True,
+                ),
+                _candidate(
+                    full_name="owner/other", integration_name="own_other"
+                ),
+                _candidate(
+                    full_name="other/shared_installed",
+                    integration_name="shared_installed",
+                    installed=True,
+                    shared=True,
+                ),
+                _candidate(
+                    full_name="other/shared_other",
+                    integration_name="shared_other",
+                    shared=True,
+                ),
+            ],
+            inspected=4,
+        ),
+    )
+
+    result = await _open_discover(hass, entry)
+
+    selector = next(iter(result["data_schema"].schema.values()))
+    labels = [option["label"] for option in selector.config["options"]]
+    assert "Your private repositories" in labels[0]
+    assert "Your private repositories" not in labels[1]
+    assert "Shared with you" in labels[2]
+    assert "Shared with you" not in labels[3]
+    assert [option["value"] for option in selector.config["options"]] == [
+        "owner/installed::own_installed",
+        "owner/other::own_other",
+        "other/shared_installed::shared_installed",
+        "other/shared_other::shared_other",
+    ]
+
+
+async def test_an_installed_folder_can_be_adopted(
+    hass, entry, aioclient_mock, monkeypatch
+):
+    from pathlib import Path
+
+    from custom_components.private_integrations.catalog import Discovery
+
+    folder = Path(hass.config.path("custom_components")) / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text('{"domain": "foo"}', encoding="utf-8")
+    _fake_detection(
+        monkeypatch, Discovery([_candidate(installed=True)], inspected=1)
+    )
+    aioclient_mock.get(REPO_URL, json={"default_branch": "main"})
+    aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
+    aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+
+    result = await _open_discover(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FULL_NAME: "owner/foo::foo"}
+    )
+    assert result["step_id"] == "proposal"
+    assert CONF_ADOPT in result["data_schema"].schema
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_REF_TYPE: "branch",
+            CONF_REF: "",
+            "install_now": True,
+            CONF_ADOPT: True,
+        },
+    )
+
+    assert result["step_id"] == "installed_confirmation"
+    marker = json.loads(
+        (folder / ".private_integrations.json").read_text(encoding="utf-8")
+    )
+    assert marker["full_name"] == "owner/foo"
+    assert store.get("owner/foo").adopt is False
+
+
+async def test_adoption_without_installing_is_applied_later(
+    hass, entry, aioclient_mock, monkeypatch
+):
+    from pathlib import Path
+
+    from custom_components.private_integrations.catalog import Discovery
+
+    folder = Path(hass.config.path("custom_components")) / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text('{"domain": "foo"}', encoding="utf-8")
+    _fake_detection(
+        monkeypatch, Discovery([_candidate(installed=True)], inspected=1)
+    )
+    aioclient_mock.get(REPO_URL, json={"default_branch": "main"})
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+
+    result = await _open_discover(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FULL_NAME: "owner/foo::foo"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_REF_TYPE: "branch",
+            CONF_REF: "",
+            "install_now": False,
+            CONF_ADOPT: True,
+        },
+    )
+
+    assert result["step_id"] == "tracked_confirmation"
+    assert store.get("owner/foo").adopt is True
+
+    aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
+    aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
+    manage = await hass.config_entries.options.async_init(entry.entry_id)
+    manage = await hass.config_entries.options.async_configure(
+        manage["flow_id"], {"next_step_id": "manage_repository"}
+    )
+    manage = await hass.config_entries.options.async_configure(
+        manage["flow_id"], {CONF_FULL_NAME: "owner/foo"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        manage["flow_id"], {"action": "install"}
+    )
+
+    assert result["step_id"] == "installed_confirmation"
+    assert store.get("owner/foo").adopt is False
+
+
+async def test_a_folder_of_another_tracked_repository_is_not_adoptable(
+    hass, entry, monkeypatch
+):
+    from pathlib import Path
+
+    from custom_components.private_integrations.catalog import Discovery
+
+    folder = Path(hass.config.path("custom_components")) / "foo"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text('{"domain": "foo"}', encoding="utf-8")
+    (folder / ".private_integrations.json").write_text(
+        '{"full_name": "other/repo"}', encoding="utf-8"
+    )
+    store = hass.data[DOMAIN][entry.entry_id]["store"]
+    store.upsert(Repository(full_name="other/repo", integration_name="foo"))
+    _fake_detection(
+        monkeypatch, Discovery([_candidate(installed=True)], inspected=1)
+    )
+
+    result = await _open_discover(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FULL_NAME: "owner/foo::foo"}
+    )
+
+    assert result["step_id"] == "proposal"
+    assert CONF_ADOPT not in result["data_schema"].schema
+
+
 async def test_a_proposal_with_a_foreign_folder_is_refused_before_tracking(
     hass, entry, monkeypatch
 ):
@@ -1271,6 +1442,7 @@ async def test_a_discovered_integration_can_be_added_and_installed(
     assert result["description_placeholders"]["integration"] == "foo"
     assert result["description_placeholders"]["version"] == "1.0.0"
     assert result["description_placeholders"]["branch"] == "main"
+    assert CONF_ADOPT not in result["data_schema"].schema
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -1505,8 +1677,14 @@ async def test_discovery_end_to_end_with_the_real_github_client(
                 "full_name": "owner/foo",
                 "default_branch": "main",
                 "private": True,
+                "owner": {"login": "cypherbits"},
             },
-            {"full_name": "owner/no_integration", "default_branch": "main"},
+            {
+                "full_name": "owner/no_integration",
+                "default_branch": "main",
+                "private": True,
+                "owner": {"login": "cypherbits"},
+            },
         ],
     )
     aioclient_mock.get(
@@ -1547,7 +1725,15 @@ async def test_discovery_end_to_end_when_nothing_is_installable(
         "&affiliation=owner%2Ccollaborator%2Corganization_member"
     )
     aioclient_mock.get(
-        list_url, json=[{"full_name": "owner/plain", "default_branch": "main"}]
+        list_url,
+        json=[
+            {
+                "full_name": "owner/plain",
+                "default_branch": "main",
+                "private": True,
+                "owner": {"login": "cypherbits"},
+            }
+        ],
     )
     aioclient_mock.get(
         "https://api.github.com/repos/owner/plain/contents/custom_components?ref=main",

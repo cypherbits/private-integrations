@@ -29,8 +29,10 @@ for access to private ones.
 - Path-traversal-safe tarball extraction.
 - **A list of your integrations** — every tracked repository with the folder it
   installs into, the version declared by its `manifest.json` and how it is
-  followed, and a search of every repository your token can read, offered as
-  proposals to add with one click. Nothing is installed until you confirm.
+  followed, and a search of every **private** repository your token can read,
+  offered as proposals to add with one click. Your own repositories come first,
+  installed ones before the rest, then the private repositories shared with you.
+  Nothing is installed until you confirm.
 
 Themes, dashboards, templates, apps, and the other Marketplace categories are
 out of scope. This is integrations only.
@@ -193,25 +195,34 @@ integrations in my GitHub repositories** and **Update the GitHub token**.
 ### Finding integrations in your account
 
 **Find integrations in my GitHub repositories** asks GitHub for every
-repository the token can read, then looks for a
+**private** repository the token can read, then looks for a
 `custom_components/<name>/manifest.json` folder in each one. What it finds is
 listed as proposals, with the version in the manifest:
 
 - A **fine-grained PAT** only sees the repositories it was scoped to, so the
   list is exactly that set. A **classic PAT** sees everything the account can
   read, including organisation repositories the account belongs to.
-- Repositories already tracked are left out; archived ones are skipped.
-- The lookup is capped (about 60 repositories, most recently updated first,
-  plus a limit on the manifests it reads), so it answers in seconds instead of
-  walking an organisation with a thousand repos. If either limit cuts the
-  search short, the proposals screen says so. Only when you pick a proposal
-  is anything installed: the next screen shows the integration, its version
-  and how it will be followed, exactly like the manual form.
+- Public repositories are left out: the Marketplace handles those. Repositories
+  already tracked are left out too, and archived ones are skipped.
+- The list is grouped. Your own private repositories come first, with the ones
+  whose folder is already on disk before the rest. After a separator come the
+  private repositories shared with you, whether by another user or by an
+  organisation, as long as the token can at least read them.
+- The lookup is capped (about 60 private repositories, most recently updated
+  first, plus a limit on the manifests it reads), so it answers in seconds
+  instead of walking an organisation with a thousand repos. If either limit
+  cuts the search short, the proposals screen says so. Only when you pick a
+  proposal is anything installed: the next screen shows the integration, its
+  version and how it will be followed, exactly like the manual form.
 - A folder that is not an integration — no manifest, or a manifest whose
   `domain` does not match the folder — is not offered. Neither is a repository
   without `custom_components/<name>/`.
 - If GitHub cannot answer (bad token, rate limit), the screen says which one it
   was instead of showing an empty list.
+- If the candidate's folder is already on disk and has no ownership marker,
+  the confirmation screen offers **Adopt**. Checking it lets the next install
+  take that folder over and manage it from here; without it, the existing
+  protection still refuses to overwrite a folder another tool installed.
 
 ### Adding one by hand
 
@@ -263,9 +274,12 @@ and:
 The screen also says how many folders under `custom_components/` this
 integration does not manage — installed by the Marketplace, HACS, Home
 Assistant itself or by hand. The discovery marks a proposal whose folder is
-already on disk as **already installed**: adding it is refused until that
-folder is removed, except when its owner is no longer tracked, the one case a
-new repository can take it over.
+already on disk as **already installed**. If that folder has no ownership
+marker, the proposal screen offers **Adopt**: checking it records the intent
+and the next install replaces the folder and writes this tool's marker, after
+which it is managed from here. Without it, the folder is protected exactly as
+before. A folder whose owner is no longer tracked is still taken over
+automatically, and one owned by another tracked repository cannot be adopted.
 
 Installs never overwrite a `custom_components/<name>/` folder that Private
 Integrations did not create: integrations installed by the Marketplace, HACS,

@@ -22,6 +22,7 @@ class Repository:
     integration_name: str | None = None
     installed_version: str | None = None
     installed_sha: str | None = None
+    adopt: bool = False
 
     @property
     def key(self) -> str:
@@ -60,6 +61,7 @@ class Repository:
             integration_name=integration_name,
             installed_version=_optional_text(values, "installed_version"),
             installed_sha=_optional_text(values, "installed_sha"),
+            adopt=_optional_bool(values, "adopt"),
         )
 
 
@@ -99,6 +101,14 @@ def _optional_text(values: dict[str, Any], key: str) -> str | None:
         return None
     if not isinstance(value, str):
         raise ValueError(f"{key} must be a string, not {type(value).__name__}")
+    return value
+
+
+def _optional_bool(values: dict[str, Any], key: str) -> bool:
+    """Return a boolean field, defaulting to False when it is absent."""
+    value = values.get(key, False)
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean, not {type(value).__name__}")
     return value
 
 

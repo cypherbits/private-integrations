@@ -44,6 +44,7 @@ class Candidate:
     default_branch: str = "main"
     private: bool = False
     installed: bool = False
+    shared: bool = False
 
     @property
     def key(self) -> str:
@@ -90,12 +91,17 @@ async def async_detect_integrations(
     installed: Collection[str] = (),
     max_repositories: int = MAX_REPOSITORIES,
 ) -> Discovery:
-    """Return every integration offered by a repository the token can read.
+    """Return every integration offered by a private repository the token can read.
 
     Repositories that are already tracked are skipped: they are on the manage
     screen, and offering them again would only be a way to get an error.
     ``installed`` is the list of folders already in ``custom_components/``, used
     to say which candidates are already on disk.
+
+    Public repositories are not offered at all: the Marketplace handles them.
+    The candidates are ordered with the token account's private repositories
+    first -- installed ones before the rest -- and repositories shared with the
+    account after them.
 
     A single unreadable repository does not fail the lookup -- a token usually
     sees unrelated repositories too -- but a rate limit stops it, and is
@@ -103,6 +109,7 @@ async def async_detect_integrations(
     list that looks like "you have no integrations".
     """
     repositories = await client.async_list_repositories()
+    login = (await client.async_get_login()).lower()
     tracked_keys = {name.lower() for name in tracked}
     installed_names = set(installed)
 
@@ -169,8 +176,9 @@ async def async_detect_integrations(
                         integration_name=name,
                         version=_text(manifest.get("version")),
                         default_branch=branch,
-                        private=bool(repository.get("private")),
+                        private=True,
                         installed=name in installed_names,
+                        shared=_is_shared(repository, login),
                     )
                 )
 
@@ -183,7 +191,14 @@ async def async_detect_integrations(
             "GitHub rate limit reached before any integration was found"
         )
 
-    candidates.sort(key=lambda c: (c.full_name.lower(), c.integration_name))
+    candidates.sort(
+        key=lambda c: (
+            c.shared,
+            not c.installed,
+            c.full_name.lower(),
+            c.integration_name,
+        )
+    )
     return Discovery(
         candidates=candidates,
         inspected=len(inspectable),
@@ -196,7 +211,7 @@ async def async_detect_integrations(
 
 
 def _is_inspectable(repository: Any, tracked: set[str]) -> bool:
-    """True for a repository worth one API call."""
+    """True for a private repository worth one API call."""
     if not isinstance(repository, dict):
         return False
     full_name = repository.get("full_name")
@@ -204,7 +219,25 @@ def _is_inspectable(repository: Any, tracked: set[str]) -> bool:
         return False
     if full_name.lower() in tracked:
         return False
+    if repository.get("private") is not True:
+        # Public repositories belong to the Marketplace.
+        return False
     return not repository.get("archived")
+
+
+def _is_shared(repository: dict[str, Any], login: str) -> bool:
+    """True when the repository belongs to another account or organisation.
+
+    A missing login (GitHub did not say who the token belongs to) keeps every
+    candidate in the first group, which is the least surprising fallback.
+    """
+    if not login:
+        return False
+    owner = repository.get("owner")
+    owner_login = owner.get("login") if isinstance(owner, dict) else None
+    return not (
+        isinstance(owner_login, str) and owner_login.lower() == login
+    )
 
 
 def _parse_manifest(text: str | None) -> dict[str, Any] | None:

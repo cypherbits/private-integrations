@@ -75,6 +75,8 @@ class GitHubClient:
     def __init__(self, session: aiohttp.ClientSession, token: str) -> None:
         self._session = session
         self._token = token
+        #: Login of the account behind the token, when it is already known.
+        self._login: str | None = None
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -156,7 +158,21 @@ class GitHubClient:
     async def verify_token(self) -> dict[str, Any]:
         """Confirm the token works and return /user payload."""
         payload = await self._get_json(f"{GITHUB_API_BASE}/user")
-        return _as_dict(payload, "GET /user")
+        user = _as_dict(payload, "GET /user")
+        login = user.get("login")
+        if isinstance(login, str) and login:
+            self._login = login
+        return user
+
+    async def async_get_login(self) -> str:
+        """Login of the token's account, asking GitHub only when unknown.
+
+        ``async_setup_entry`` already verifies the token, so discovery normally
+        reuses that answer instead of spending another request on ``/user``.
+        """
+        if self._login is None:
+            await self.verify_token()
+        return self._login or ""
 
     async def get_repo(self, full_name: str) -> dict[str, Any]:
         payload = await self._get_json(f"{GITHUB_API_BASE}/repos/{full_name}")

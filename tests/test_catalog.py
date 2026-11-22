@@ -14,15 +14,19 @@ from custom_components.private_integrations.github import (
 class FakeClient:
     """A GitHub client that answers from dictionaries and records the calls."""
 
-    def __init__(self, repositories=(), folders=None, files=None):
+    def __init__(self, repositories=(), folders=None, files=None, login="owner"):
         self._repositories = list(repositories)
         self._folders = folders or {}
         self._files = files or {}
+        self._login = login
         self.folder_calls: list[tuple[str, str, str | None]] = []
         self.file_calls: list[tuple[str, str, str | None]] = []
 
     async def async_list_repositories(self):
         return self._repositories
+
+    async def async_get_login(self):
+        return self._login
 
     async def async_list_folder(self, full_name, path, ref=None):
         self.folder_calls.append((full_name, path, ref))
@@ -39,8 +43,15 @@ class FakeClient:
         return value
 
 
-def repo(full_name="owner/foo", **extra):
-    return {"full_name": full_name, "default_branch": "main", **extra}
+def repo(full_name="owner/foo", private=True, **extra):
+    owner = full_name.split("/", 1)[0]
+    return {
+        "full_name": full_name,
+        "default_branch": "main",
+        "private": private,
+        "owner": {"login": owner},
+        **extra,
+    }
 
 
 def folder(*names):
@@ -83,7 +94,14 @@ async def test_detects_the_integration_of_a_repository():
 
 async def test_uses_the_repository_default_branch():
     client = FakeClient(
-        [{"full_name": "owner/foo", "default_branch": "trunk"}],
+        [
+            {
+                "full_name": "owner/foo",
+                "default_branch": "trunk",
+                "private": True,
+                "owner": {"login": "owner"},
+            }
+        ],
         folders={"owner/foo": folder("foo")},
         files={("owner/foo", "custom_components/foo/manifest.json"): manifest()},
     )
@@ -272,6 +290,95 @@ async def test_candidates_are_sorted_by_repository():
         "owner/alpha",
         "owner/zeta",
     ]
+
+
+async def test_public_repositories_are_not_offered():
+    """The Marketplace handles public repositories."""
+    client = FakeClient(
+        [
+            repo("owner/public", private=False),
+            {
+                "full_name": "owner/missing_private",
+                "default_branch": "main",
+                "owner": {"login": "owner"},
+            },
+            repo("owner/private"),
+        ],
+        folders={
+            "owner/public": folder("public"),
+            "owner/missing_private": folder("missing_private"),
+            "owner/private": folder("private"),
+        },
+        files={
+            ("owner/public", "custom_components/public/manifest.json"): manifest(
+                "public"
+            ),
+            (
+                "owner/missing_private",
+                "custom_components/missing_private/manifest.json",
+            ): manifest("missing_private"),
+            ("owner/private", "custom_components/private/manifest.json"): manifest(
+                "private"
+            ),
+        },
+    )
+
+    discovery = await async_detect_integrations(client)
+
+    assert [candidate.full_name for candidate in discovery.candidates] == [
+        "owner/private"
+    ]
+    assert discovery.inspected == 1
+    assert discovery.listed == 3
+    assert client.folder_calls == [("owner/private", "custom_components", "main")]
+
+
+async def test_own_repositories_come_before_shared_ones_and_installed_first():
+    entries = [
+        ("other/shared_installed", "shared_installed"),
+        ("owner/own_not_installed", "own_not_installed"),
+        ("other/shared_not_installed", "shared_not_installed"),
+        ("owner/own_installed", "own_installed"),
+    ]
+    repositories = [repo(full_name) for full_name, _ in entries]
+    folders = {full_name: folder(name) for full_name, name in entries}
+    files = {
+        (full_name, f"custom_components/{name}/manifest.json"): manifest(name)
+        for full_name, name in entries
+    }
+    client = FakeClient(
+        repositories,
+        folders=folders,
+        files=files,
+        login="owner",
+    )
+
+    discovery = await async_detect_integrations(
+        client, installed=["own_installed", "shared_installed"]
+    )
+
+    assert [
+        (candidate.full_name, candidate.shared, candidate.installed)
+        for candidate in discovery.candidates
+    ] == [
+        ("owner/own_installed", False, True),
+        ("owner/own_not_installed", False, False),
+        ("other/shared_installed", True, True),
+        ("other/shared_not_installed", True, False),
+    ]
+
+
+async def test_a_missing_login_keeps_every_repository_in_the_own_group():
+    client = FakeClient(
+        [repo("owner/foo")],
+        folders={"owner/foo": folder("foo")},
+        files={("owner/foo", "custom_components/foo/manifest.json"): manifest()},
+        login="",
+    )
+
+    discovery = await async_detect_integrations(client)
+
+    assert discovery.candidates[0].shared is False
 
 
 def test_candidate_key_is_the_selector_value():

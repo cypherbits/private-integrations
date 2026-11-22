@@ -44,6 +44,7 @@ from .const import (
     ACTION_INSTALL,
     ACTION_REMOVE,
     CONF_ACTION,
+    CONF_ADOPT,
     CONF_DELETE_FILES,
     CONF_FULL_NAME,
     CONF_GITHUB_TOKEN,
@@ -271,6 +272,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         ref: str | None,
         integration_name: str | None,
         install_now: bool,
+        adopt: bool = False,
     ) -> ConfigFlowResult | None:
         """Track a repository and optionally install it, shared by both add paths.
 
@@ -285,6 +287,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 ref_type=ref_type,
                 ref=ref,
                 integration_name=integration_name,
+                adopt=adopt,
             )
         except HomeAssistantError as err:
             _LOGGER.warning("add_repository failed for %r: %s", full_name, err)
@@ -296,7 +299,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             # install_now was unchecked — repo registered, no install
             return await self.async_step_tracked_confirmation()
         try:
-            result = await manager.install_or_update(repo.full_name)
+            result = await manager.install_or_update(repo.full_name, adopt=adopt)
         except HomeAssistantError as err:
             # Keep the repository tracked. It was added successfully -- the URL,
             # the token and the ref are fine -- and only the download or the
@@ -316,6 +319,7 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         integration_name: str | None,
         *,
         install_now: bool,
+        adopt: bool = False,
     ) -> str | None:
         """Why the install would be refused, before the repository is tracked.
 
@@ -331,7 +335,9 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         except HomeAssistantError:
             # Let add_repository report the malformed reference.
             return None
-        return await manager.install_blocker(full_name, integration_name)
+        return await manager.install_blocker(
+            full_name, integration_name, adopt=adopt
+        )
 
     async def async_step_add_repository(
         self, user_input: dict[str, Any] | None = None
@@ -484,13 +490,26 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 return self.async_abort(reason="no_candidates")
             return await self.async_step_proposal()
 
-        options = [
-            SelectOptionDict(
-                value=candidate.key,
-                label=await self._async_candidate_label(candidate),
+        # A real separator is not possible inside a SelectSelector list, so the
+        # section heading is shown on the first row of each group instead.
+        show_sections = len({candidate.shared for candidate in candidates}) > 1
+        options: list[SelectOptionDict] = []
+        section: bool | None = None
+        for candidate in candidates:
+            heading = None
+            if show_sections and candidate.shared != section:
+                heading = (
+                    "section_shared" if candidate.shared else "section_private"
+                )
+            options.append(
+                SelectOptionDict(
+                    value=candidate.key,
+                    label=await self._async_candidate_label(
+                        candidate, section=heading
+                    ),
+                )
             )
-            for candidate in candidates
-        ]
+            section = candidate.shared
         schema = vol.Schema(
             {
                 vol.Required(
@@ -556,12 +575,16 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             # the only thing the user can have picked from.
             return self.async_abort(reason="no_candidates")
 
+        adoptable = await self._async_adoptable(candidate)
+
         if user_input is not None:
             install_now = user_input.get(CONF_INSTALL_NOW, True)
+            adopt = adoptable and bool(user_input.get(CONF_ADOPT, False))
             blocker = await self._async_install_blocker(
                 candidate.full_name,
                 candidate.integration_name,
                 install_now=install_now,
+                adopt=adopt,
             )
             if blocker is not None:
                 self._error_detail = blocker
@@ -573,26 +596,28 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                     ref=user_input.get(CONF_REF) or None,
                     integration_name=candidate.integration_name,
                     install_now=install_now,
+                    adopt=adopt,
                 )
                 if result is not None:
                     return result
                 errors["base"] = "add_failed"
 
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_REF_TYPE, default=REF_TYPE_BRANCH
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=list(VALID_REF_TYPES),
-                        mode=SelectSelectorMode.DROPDOWN,
-                        translation_key="ref_type",
-                    )
-                ),
-                vol.Optional(CONF_REF, default=""): str,
-                vol.Optional(CONF_INSTALL_NOW, default=True): bool,
-            }
-        )
+        fields: dict[Any, Any] = {
+            vol.Required(
+                CONF_REF_TYPE, default=REF_TYPE_BRANCH
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=list(VALID_REF_TYPES),
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key="ref_type",
+                )
+            ),
+            vol.Optional(CONF_REF, default=""): str,
+            vol.Optional(CONF_INSTALL_NOW, default=True): bool,
+        }
+        if adoptable:
+            fields[vol.Optional(CONF_ADOPT, default=False)] = bool
+        schema = vol.Schema(fields)
         return self.async_show_form(
             step_id="proposal",
             data_schema=schema,
@@ -605,6 +630,25 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
                 "detail": self._error_detail,
             },
         )
+
+    async def _async_adoptable(self, candidate: Candidate) -> bool:
+        """True when the candidate's folder is on disk without an owner marker.
+
+        Only a folder that carries no ownership marker needs an explicit
+        adoption: one owned by a repository that is no longer tracked is taken
+        over automatically, and one owned by another tracked repository can
+        never be adopted here.
+        """
+        if not candidate.installed or not candidate.integration_name:
+            return False
+        folder = (
+            Path(self.hass.config.path("custom_components"))
+            / candidate.integration_name
+        )
+        if not await self.hass.async_add_executor_job(folder.is_dir):
+            return False
+        owner = await self.hass.async_add_executor_job(installed_owner, folder)
+        return owner is None
 
     # --- Manage existing ----------------------------------------------------
 
@@ -711,11 +755,15 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
         )
         return True, version
 
-    async def _async_candidate_label(self, candidate: Candidate) -> str:
+    async def _async_candidate_label(
+        self, candidate: Candidate, *, section: str | None = None
+    ) -> str:
         """One proposal: what it is, and anything worth knowing about it."""
         flags = []
         if candidate.private:
             flags.append(await async_translate(self.hass, "flag_private"))
+        if candidate.shared:
+            flags.append(await async_translate(self.hass, "flag_shared"))
         if candidate.installed:
             flags.append(await async_translate(self.hass, "flag_installed"))
         label = (
@@ -723,7 +771,11 @@ class PrivateIntegrationsOptionsFlow(OptionsFlow):
             f"custom_components/{candidate.integration_name}"
             f" ({candidate.version or '?'})"
         )
-        return f"{label} · {' · '.join(flags)}" if flags else label
+        row = f"{label} · {' · '.join(flags)}" if flags else label
+        if section is None:
+            return row
+        heading = await async_translate(self.hass, section)
+        return f"── {heading} ──\n{row}"
 
     async def _count_unmanaged(self, repos: list[Repository]) -> int:
         """Integrations on disk that no tracked repository here installed.

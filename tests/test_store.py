@@ -23,6 +23,7 @@ async def test_save_and_load_round_trip(hass, hass_storage):
             integration_name="foo",
             installed_version="v1.2.3",
             installed_sha="a" * 40,
+            adopt=True,
         )
     )
     await store.async_save()
@@ -140,6 +141,7 @@ async def test_an_entry_with_a_non_string_full_name_is_skipped(
         {"full_name": "owner/foo", "ref_type": "banana"},
         {"full_name": "owner/foo", "ref_type": "branch", "integration_name": 5},
         {"full_name": "owner/foo", "ref_type": "branch", "installed_sha": 1},
+        {"full_name": "owner/foo", "ref_type": "branch", "adopt": "yes"},
         {"ref_type": "branch"},
         {"full_name": "owner/foo", "ref_type": None},
     ],

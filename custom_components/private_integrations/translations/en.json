@@ -54,22 +54,23 @@
       },
       "discover": {
         "title": "Find integrations",
-        "description": "Every repository your token can read is checked for a folder under `custom_components/` that has a `manifest.json`. **{inspected}** repositories were checked (up to {limit}, most recently updated first).\n\nRepositories you already track are not offered again. A fine-grained token only sees the repositories it was scoped to; a classic one sees everything the account can read.\n\nSubmit to go back to the menu."
+        "description": "Every **private** repository your token can read is checked for a folder under `custom_components/` that has a `manifest.json`. **{inspected}** repositories were checked (up to {limit}, most recently updated first).\n\nPublic repositories are not listed: the Marketplace handles those. Repositories you already track are not offered again. A fine-grained token only sees the repositories it was scoped to; a classic one sees everything the account can read.\n\nSubmit to go back to the menu."
       },
       "proposals": {
         "title": "Integrations found",
-        "description": "**{count}** integration(s) found in repositories you do not track yet. Pick one: nothing is downloaded until you confirm on the next screen.\n\n{note}",
+        "description": "**{count}** integration(s) found in private repositories you do not track yet. Yours come first, installed ones before the rest, and repositories shared with you are listed after the separator. Pick one: nothing is downloaded until you confirm on the next screen.\n\n{note}",
         "data": {
           "full_name": "Integration"
         }
       },
       "proposal": {
         "title": "{repo}",
-        "description": "**{repo}** provides `custom_components/{integration}` (version `{version}` in its default branch `{branch}`).\n\nHow should it be followed? **Release** needs a published release in the repository. **Branch** follows the repository's default branch when the ref is left blank.\n\nWith **Install immediately** checked the files are written into `custom_components/` right away, and a restart is needed to load them.",
+        "description": "**{repo}** provides `custom_components/{integration}` (version `{version}` in its default branch `{branch}`).\n\nHow should it be followed? **Release** needs a published release in the repository. **Branch** follows the repository's default branch when the ref is left blank.\n\nWith **Install immediately** checked the files are written into `custom_components/` right away, and a restart is needed to load them.\n\nIf the folder is already on disk and is not managed here, check **Adopt** to take it over. With **Install immediately** unchecked the adoption is saved for the next install.",
         "data": {
           "ref_type": "Track by",
           "ref": "Tag / branch / commit (leave blank for the default branch)",
-          "install_now": "Install immediately after adding"
+          "install_now": "Install immediately after adding",
+          "adopt": "Adopt the existing folder and manage it from here"
         }
       },
       "manage_repository": {
@@ -136,7 +137,7 @@
       "add_failed": "Could not add the repository: {detail}",
       "action_failed": "Action failed: {detail}",
       "rate_limited": "GitHub rate limit reached: {detail}",
-      "no_candidates": "No integration was found in the repositories your token can read. They may all be tracked already, or none of them has a folder under `custom_components/` with a `manifest.json`.\n\n{detail}",
+      "no_candidates": "No private integration was found in the repositories your token can read. Public repositories are skipped because the Marketplace handles them. They may all be tracked already, or none of them has a folder under `custom_components/` with a `manifest.json`.\n\n{detail}",
       "not_readable": "GitHub did not let this token read the contents of any repository. A fine-grained token needs **Repository permissions → Contents: Read-only** on the repositories you want to find, and the repositories must be in its 'Repository access' list.\n\n{detail}",
       "no_repositories_visible": "GitHub returned no repositories for this token. A fine-grained token only sees the repositories added to its 'Repository access' list; a classic token sees everything the account can read."
     },
@@ -174,7 +175,10 @@
     "latest_release": "latest release",
     "default_branch": "default branch",
     "flag_private": "private",
+    "flag_shared": "shared",
     "flag_installed": "already installed",
+    "section_private": "Your private repositories",
+    "section_shared": "Shared with you",
     "folder_not_chosen": "folder not chosen",
     "discovery_truncated": "Only the first {limit} repositories were checked, starting with the most recently updated: some integrations may not be listed.",
     "discovery_manifests_truncated": "The search stopped after reading {limit} manifests: some repositories were only partly checked.",

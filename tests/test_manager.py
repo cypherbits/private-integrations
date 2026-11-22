@@ -1165,6 +1165,56 @@ async def test_install_blocker_allows_an_adoptable_folder(manager):
     assert await manager.install_blocker("owner/foo", "foo") is None
 
 
+async def test_install_blocker_accepts_a_foreign_folder_with_adoption(manager):
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    (dest / "manifest.json").write_text('{"domain": "foo"}')
+
+    assert await manager.install_blocker("owner/foo", "foo", adopt=True) is None
+
+
+async def test_adoption_is_still_refused_for_another_tracked_repository(manager):
+    track(manager, full_name="other/repo", integration_name="foo")
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    write_marker(dest, {"full_name": "other/repo"})
+
+    assert await manager.install_blocker("owner/foo", "foo", adopt=True) is not None
+
+
+async def test_install_or_update_adopts_an_unmarked_folder(
+    hass, aioclient_mock, manager
+):
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    (dest / "manifest.json").write_text('{"domain": "foo", "version": "9.9"}')
+    track(manager, integration_name="foo")
+    aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
+    aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
+
+    result = await manager.install_or_update("owner/foo", adopt=True)
+
+    assert result.changed
+    assert read_marker(dest)["full_name"] == "owner/foo"
+    assert json.loads((dest / "manifest.json").read_text())["version"] == "1.0.0"
+
+
+async def test_a_remembered_adoption_is_used_and_cleared(
+    hass, aioclient_mock, manager
+):
+    dest = manager._custom_components_dir / "foo"
+    dest.mkdir(parents=True)
+    (dest / "manifest.json").write_text('{"domain": "foo"}')
+    repo = track(manager, integration_name="foo", adopt=True)
+    aioclient_mock.get(f"{REPO_URL}/commits/main", json={"sha": SHA})
+    aioclient_mock.get(f"{REPO_URL}/tarball/{SHA}", content=make_tarball())
+
+    await manager.install_or_update("owner/foo")
+
+    assert read_marker(dest)["full_name"] == "owner/foo"
+    assert repo.adopt is False
+
+
 async def test_install_blocker_reports_a_folder_of_another_tracked_repo(manager):
     track(manager, full_name="other/repo", integration_name="foo")
     dest = manager._custom_components_dir / "foo"

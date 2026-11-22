@@ -51,6 +51,32 @@ async def test_download_404_is_not_found(hass, aioclient_mock):
         await client.download_tarball("owner/foo", "main")
 
 
+async def test_login_is_remembered_after_verifying_the_token(hass, aioclient_mock):
+    aioclient_mock.get(USER_URL, json={"login": "cypherbits"})
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    await client.verify_token()
+    aioclient_mock.clear_requests()
+
+    assert await client.async_get_login() == "cypherbits"
+
+
+async def test_login_is_requested_when_it_is_not_known_yet(hass, aioclient_mock):
+    aioclient_mock.get(USER_URL, json={"login": "cypherbits"})
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert await client.async_get_login() == "cypherbits"
+
+
+async def test_a_github_user_without_a_login_yields_an_empty_one(
+    hass, aioclient_mock
+):
+    aioclient_mock.get(USER_URL, json={})
+    client = GitHubClient(async_get_clientsession(hass), "token")
+
+    assert await client.async_get_login() == ""
+
+
 # --- Rate limits ------------------------------------------------------------
 
 

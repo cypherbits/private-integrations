@@ -179,6 +179,8 @@ class PrivateIntegrationsManager:
         ref_type: str = REF_TYPE_BRANCH,
         ref: str | None = None,
         integration_name: str | None = None,
+        *,
+        adopt: bool = False,
     ) -> Repository:
         """Track a repository, serialized with installs and removals."""
         async with self._lock:
@@ -187,6 +189,7 @@ class PrivateIntegrationsManager:
                 ref_type=ref_type,
                 ref=ref,
                 integration_name=integration_name,
+                adopt=adopt,
             )
 
     async def _add_repository(
@@ -195,6 +198,8 @@ class PrivateIntegrationsManager:
         ref_type: str = REF_TYPE_BRANCH,
         ref: str | None = None,
         integration_name: str | None = None,
+        *,
+        adopt: bool = False,
     ) -> Repository:
         full_name = self.parse_repo_input(full_name_or_url)
 
@@ -251,6 +256,7 @@ class PrivateIntegrationsManager:
             ref_type=ref_type,
             ref=resolved,
             integration_name=integration_name,
+            adopt=bool(adopt),
         )
         self.store.upsert(repo)
         await self.store.async_save()
@@ -404,7 +410,11 @@ class PrivateIntegrationsManager:
         return repo
 
     async def install_or_update(
-        self, full_name_or_url: str, *, force: bool = False
+        self,
+        full_name_or_url: str,
+        *,
+        force: bool = False,
+        adopt: bool = False,
     ) -> InstallResult:
         full_name = self.parse_repo_input(full_name_or_url)
 
@@ -415,12 +425,16 @@ class PrivateIntegrationsManager:
             repo = self.store.get(full_name)
             if not repo:
                 raise HomeAssistantError(f"{full_name} is not tracked")
-            return await self._install_or_update(repo, force=force)
+            return await self._install_or_update(repo, force=force, adopt=adopt)
 
     async def _install_or_update(
-        self, repo: Repository, *, force: bool
+        self, repo: Repository, *, force: bool, adopt: bool = False
     ) -> InstallResult:
         full_name = repo.full_name
+        # An adoption checked while adding the repository is remembered until
+        # the files are finally installed, so adding it without installing right
+        # away is not a dead end.
+        adopt = adopt or repo.adopt
         try:
             sha, version = await self._resolve_version(repo)
         except GitHubRateLimitError as err:
@@ -434,11 +448,17 @@ class PrivateIntegrationsManager:
             _LOGGER.debug(
                 "%s is already installed at %s, nothing to do", full_name, sha[:7]
             )
+            updated = False
             if repo.installed_version != version:
                 # Same commit under a new name (a tag pointing at the branch
                 # head, say). The files are already right, but the label the
                 # manage screen shows would still name the previous ref.
                 repo.installed_version = version
+                updated = True
+            if repo.adopt:
+                repo.adopt = False
+                updated = True
+            if updated:
                 self.store.upsert(repo)
                 await self.store.async_save()
             return InstallResult(repo, changed=False)
@@ -469,6 +489,7 @@ class PrivateIntegrationsManager:
             tarball,
             dest_root,
             integration_name,
+            adopt=adopt,
             marker={
                 "full_name": repo.full_name,
                 "integration_name": integration_name,
@@ -480,6 +501,7 @@ class PrivateIntegrationsManager:
         repo.integration_name = integration_name
         repo.installed_sha = sha
         repo.installed_version = version
+        repo.adopt = False
         self.store.upsert(repo)
         await self.store.async_save()
 
@@ -571,11 +593,12 @@ class PrivateIntegrationsManager:
         dest_root: Path,
         integration_name: str,
         *,
+        adopt: bool = False,
         marker: dict[str, Any] | None = None,
     ) -> tuple[str, Path]:
         """Install into custom_components/, refusing to clobber foreign files."""
         dest_path = dest_root / integration_name
-        allow_replace = await self._may_replace(repo, dest_path)
+        allow_replace = await self._may_replace(repo, dest_path, adopt=adopt)
         try:
             return await self.hass.async_add_executor_job(
                 partial(
@@ -593,12 +616,16 @@ class PrivateIntegrationsManager:
             # instead of escaping the service call or the options flow.
             raise HomeAssistantError(f"Install failed: {err}") from err
 
-    async def _may_replace(self, repo: Repository, dest_path: Path) -> bool:
+    async def _may_replace(
+        self, repo: Repository, dest_path: Path, *, adopt: bool = False
+    ) -> bool:
         """Allow replacing a folder only when *this* repository owns it."""
         if not dest_path.exists():
             return True
         owner = await self.hass.async_add_executor_job(installed_owner, dest_path)
-        blocker = self._replacement_blocker(repo.full_name, dest_path, owner)
+        blocker = self._replacement_blocker(
+            repo.full_name, dest_path, owner, adopt=adopt
+        )
         if blocker is not None:
             raise HomeAssistantError(blocker)
         if owner is not None and not self._owns_folder(repo, owner):
@@ -613,14 +640,19 @@ class PrivateIntegrationsManager:
         return True
 
     async def install_blocker(
-        self, full_name: str, integration_name: str | None
+        self,
+        full_name: str,
+        integration_name: str | None,
+        *,
+        adopt: bool = False,
     ) -> str | None:
         """Reason installing into the folder would be refused, or None.
 
         The options flow asks before tracking a repository, so a proposal
         pointing at a folder another tool installed does not leave a tracked
         repository behind when the install cannot succeed. An unmarked folder
-        is not adoptable; one whose owner is no longer tracked is.
+        is only replaceable with an explicit adoption; one whose owner is no
+        longer tracked is adopted automatically.
         """
         # add_repository() strips this value too; normalise here so the folder
         # that is checked is the folder that will be installed. Without it,
@@ -638,10 +670,17 @@ class PrivateIntegrationsManager:
         if not await self.hass.async_add_executor_job(dest_path.exists):
             return None
         owner = await self.hass.async_add_executor_job(installed_owner, dest_path)
-        return self._replacement_blocker(full_name, dest_path, owner)
+        return self._replacement_blocker(
+            full_name, dest_path, owner, adopt=adopt
+        )
 
     def _replacement_blocker(
-        self, full_name: str, dest_path: Path, owner: str | None
+        self,
+        full_name: str,
+        dest_path: Path,
+        owner: str | None,
+        *,
+        adopt: bool = False,
     ) -> str | None:
         """Why this repository cannot replace the folder, or None to go ahead."""
         if self._owns_folder_name(full_name, owner):
@@ -655,10 +694,13 @@ class PrivateIntegrationsManager:
                 "an integration folder: remove the other one first or pick a "
                 "different integration_name."
             )
+        if adopt:
+            return None
         return (
             f"custom_components/{dest_path.name} already exists and was not "
-            "installed by Private Integrations; refusing to overwrite it. Remove it "
-            "first or pick a different integration_name."
+            "installed by Private Integrations; refusing to overwrite it. Check "
+            "Adopt to take it over, remove it first, or pick a different "
+            "integration_name."
         )
 
     def _assert_folder_is_free(

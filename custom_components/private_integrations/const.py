@@ -18,6 +18,7 @@ CONF_DELETE_FILES = "delete_files"
 CONF_FORCE = "force"
 CONF_ACTION = "action"
 CONF_INSTALL_NOW = "install_now"
+CONF_ADOPT = "adopt"
 
 # Values of the options-flow action selector. Reinstalling the same commit was a
 # checkbox shown next to every action, including the two that ignore it.
